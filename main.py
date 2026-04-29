@@ -2,7 +2,7 @@ import heapq
 import math
 import random
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional
+from typing import Dict, List, Optional, Tuple
 
 # ============================================================
 # Configuration
@@ -44,6 +44,8 @@ POLICY_WEIGHT_LINK_QUALITY = 0.3
 POLICY_WEIGHT_COLLECTED_REVENUE = 0.2
 
 BACKUP_SCORE_THRESHOLD = 0.5
+RETURN_LINK_QUALITY_THRESHOLD = 0.15
+RETURN_REVENUE_THRESHOLD = 0.5
 
 # ============================================================
 # Data models
@@ -60,7 +62,7 @@ class Waypoint:
 @dataclass
 class UAV:
     uav_id: int
-    sequence: List[int] = field(default_factory=list)  # list of waypoint indices
+    sequence: List[int] = field(default_factory=list)
     current_index: int = 0
     last_event_time: float = 0.0
 
@@ -68,9 +70,15 @@ class UAV:
     accumulated_revenue: float = 0.0
     remaining_flight_time: float = MAX_FLIGHT_TIME
 
-    health: float = 1.0          # numerical: 1.0, 0.5, 0.0
-    link_quality: float = 1.0    # in [0,1]
-    collected_revenue: float = 0.0  # numerical: 0.0, 0.5, 1.0
+    health: float = 1.0
+    link_quality: float = 1.0
+    collected_revenue: float = 0.0
+
+    delivered_revenue: float = 0.0
+    backed_up_revenue: float = 0.0
+
+    returning_to_depot: bool = False
+    active: bool = True
 
     def current_wp_index(self) -> int:
         return self.sequence[self.current_index]
@@ -80,73 +88,59 @@ class UAV:
             return self.sequence[self.current_index + 1]
         return None
 
-    # --- state update helpers (use environment waypoints) ---
-
     def update_accumulated_risk(self, env: "GridEnvironment", sim_time: float) -> None:
-        idx = self.current_wp_index()
-        wp = env.waypoints[idx]
+        wp_idx = self.current_wp_index()
+        wp = env.waypoints[wp_idx]
         self.accumulated_risk += wp.risk
         if wp.risk == 1:
-            print(f"[{sim_time:.1f}] UAV {self.uav_id} encountered risk at WP {idx}")
+            print(f"[{sim_time:.1f}] UAV {self.uav_id} encountered risk at WP {wp_idx}")
 
     def update_accumulated_revenue(self, env: "GridEnvironment", sim_time: float) -> None:
-        idx = self.current_wp_index()
-        wp = env.waypoints[idx]
+        wp_idx = self.current_wp_index()
+        if wp_idx == DEPOT_INDEX:
+            return
+        wp = env.waypoints[wp_idx]
         self.accumulated_revenue += wp.revenue
         if wp.revenue > 0:
-            print(f"[{sim_time:.1f}] UAV {self.uav_id} collected revenue {wp.revenue:.1f} at WP {idx}")
+            print(f"[{sim_time:.1f}] UAV {self.uav_id} collected revenue {wp.revenue:.1f} at WP {wp_idx}")
 
     def update_health(self) -> None:
-        # normalize used flight time
         flight_fraction = (MAX_FLIGHT_TIME - self.remaining_flight_time) / MAX_FLIGHT_TIME
         flight_fraction = max(0.0, min(1.0, flight_fraction))
-
-        # normalize accumulated risk
         risk_fraction = min(1.0, self.accumulated_risk / MAX_WP_RISK)
-
-        # linear combination
-        score = (HEALTH_ALPHA * (1.0 - flight_fraction) +
-                 HEALTH_BETA * (1.0 - risk_fraction))
+        score = HEALTH_ALPHA * (1.0 - flight_fraction) + HEALTH_BETA * (1.0 - risk_fraction)
 
         if score > HEALTH_GOOD_THRESHOLD:
-            self.health = 1.0  # Good
+            self.health = 1.0
         elif score > HEALTH_WARNING_THRESHOLD:
-            self.health = 0.5  # Warning
+            self.health = 0.5
         else:
-            self.health = 0.0  # Critical
+            self.health = 0.0
 
     def update_link_quality(self, env: "GridEnvironment", all_uavs: List["UAV"]) -> None:
         indicators: List[int] = []
-
-        my_idx = self.current_wp_index()
-        my_wp = env.waypoints[my_idx]
+        my_wp = env.waypoints[self.current_wp_index()]
 
         for other in all_uavs:
-            if other.uav_id == self.uav_id:
+            if other.uav_id == self.uav_id or not other.active:
                 continue
             other_wp = env.waypoints[other.current_wp_index()]
             dist = euclidean_distance(my_wp, other_wp)
             indicators.append(1 if dist <= COMMUNICATION_RANGE else 0)
 
-        if indicators:
-            self.link_quality = sum(indicators) / len(indicators)
-        else:
-            self.link_quality = 0.0
+        self.link_quality = sum(indicators) / len(indicators) if indicators else 0.0
 
     def update_collected_revenue(self) -> None:
         max_possible_revenue = TOTAL_TARGETS * MAX_WP_REVENUE
-        if max_possible_revenue <= 0:
-            self.collected_revenue = 0.0
-            return
-
         revenue_fraction = min(1.0, self.accumulated_revenue / max_possible_revenue)
 
         if revenue_fraction < REVENUE_LOW_THRESHOLD:
-            self.collected_revenue = 0.0  # Low
+            self.collected_revenue = 0.0
         elif revenue_fraction < REVENUE_MEDIUM_THRESHOLD:
-            self.collected_revenue = 0.5  # Medium
+            self.collected_revenue = 0.5
         else:
-            self.collected_revenue = 1.0  # High
+            self.collected_revenue = 1.0
+
 
 # ============================================================
 # Environment
@@ -156,29 +150,20 @@ class GridEnvironment:
     def __init__(self, seed: Optional[int] = None):
         if seed is not None:
             random.seed(seed)
-
-        self.waypoints: List[Waypoint] = self._build_grid()
-        self.depot_index: int = DEPOT_INDEX
-        self.depot: Waypoint = self.waypoints[self.depot_index]
-        self.target_waypoints: List[int] = self._select_random_targets()
+        self.waypoints = self._build_grid()
+        self.depot_index = DEPOT_INDEX
+        self.target_waypoints = self._select_random_targets()
 
     def _build_grid(self) -> List[Waypoint]:
         waypoints: List[Waypoint] = []
         for x in range(GRID_WIDTH):
             for y in range(GRID_HEIGHT):
-                wp = Waypoint(x * GRID_SPACING, y * GRID_SPACING)
-                waypoints.append(wp)
-                # optional: comment out in final version if too verbose
-                # print(f"Waypoint {len(waypoints)-1}: ({wp.x}, {wp.y}) with base revenue {wp.revenue}")
+                waypoints.append(Waypoint(x * GRID_SPACING, y * GRID_SPACING))
         return waypoints
 
     def _select_random_targets(self) -> List[int]:
-        candidate_indices = [i for i in range(len(self.waypoints)) if i != self.depot_index]
-        if TOTAL_TARGETS > len(candidate_indices):
-            raise ValueError(
-                f"TOTAL_TARGETS={TOTAL_TARGETS} exceeds available non-depot waypoints={len(candidate_indices)}"
-            )
-        return random.sample(candidate_indices, TOTAL_TARGETS)
+        candidates = [i for i in range(len(self.waypoints)) if i != self.depot_index]
+        return random.sample(candidates, TOTAL_TARGETS)
 
     def assign_random_revenues(self) -> None:
         for idx in self.target_waypoints:
@@ -188,169 +173,261 @@ class GridEnvironment:
         for idx in self.target_waypoints:
             self.waypoints[idx].risk = random.choice([0, 1])
 
+
 # ============================================================
-# Utility functions
+# Utilities
 # ============================================================
 
 def euclidean_distance(wp_a: Waypoint, wp_b: Waypoint) -> float:
     return math.hypot(wp_b.x - wp_a.x, wp_b.y - wp_a.y)
 
+
 def travel_time(wp_a: Waypoint, wp_b: Waypoint) -> float:
-    dist = euclidean_distance(wp_a, wp_b)
-    return dist / UAV_SPEED
+    return euclidean_distance(wp_a, wp_b) / UAV_SPEED
+
 
 # ============================================================
-# Task allocator
+# Task allocation
 # ============================================================
 
 class TaskAllocator:
-    def __init__(self, environment: GridEnvironment):
-        self.env = environment
+    def __init__(self, env: GridEnvironment):
+        self.env = env
         self.uavs: List[UAV] = []
 
     def initialize_uavs(self) -> None:
         for uid in range(1, TOTAL_UAVS + 1):
-            uav = UAV(uav_id=uid)
-            # start all UAVs at the depot index
-            uav.sequence = [self.env.depot_index]
-            self.uavs.append(uav)
+            self.uavs.append(UAV(uav_id=uid, sequence=[DEPOT_INDEX]))
 
     def assign_random_sequences(self) -> None:
-        """
-        Non-overlapping assignment: each target waypoint goes to exactly one UAV.
-        """
         targets = list(self.env.target_waypoints)
         random.shuffle(targets)
-        uav_idx = 0
+        for i, wp_idx in enumerate(targets):
+            self.uavs[i % len(self.uavs)].sequence.append(wp_idx)
 
-        for wp_idx in targets:
-            self.uavs[uav_idx].sequence.append(wp_idx)
-            uav_idx = (uav_idx + 1) % len(self.uavs)
-
-    def compute_sequence_revenue(self, sequence: List[int]) -> float:
-        return sum(self.env.waypoints[idx].revenue for idx in sequence if idx != self.env.depot_index)
-
-    def compute_sequence_risk(self, sequence: List[int]) -> float:
-        return sum(self.env.waypoints[idx].risk for idx in sequence if idx != self.env.depot_index)
 
 # ============================================================
-# Backup policy (MDP-inspired)
+# Policy
 # ============================================================
 
 class BackupPolicy:
-    """
-    Simple parametric policy using health, link_quality, and collected_revenue.
-    """
-
     @staticmethod
-    def backup_score(uav: UAV) -> float:
-        return (POLICY_WEIGHT_HEALTH * uav.health +
-                POLICY_WEIGHT_LINK_QUALITY * uav.link_quality +
-                POLICY_WEIGHT_COLLECTED_REVENUE * uav.collected_revenue)
+    def score(uav: UAV) -> float:
+        return (
+            POLICY_WEIGHT_HEALTH * uav.health
+            + POLICY_WEIGHT_LINK_QUALITY * uav.link_quality
+            + POLICY_WEIGHT_COLLECTED_REVENUE * uav.collected_revenue
+        )
 
     @staticmethod
     def decide_action(uav: UAV) -> str:
-        """
-        Returns one of: "return_to_depot", "backup", "continue".
-        """
-        # Always return if health is critical
+        score = BackupPolicy.score(uav)
+
         if uav.health == 0.0:
             return "return_to_depot"
 
-        score = BackupPolicy.backup_score(uav)
+        if uav.collected_revenue >= RETURN_REVENUE_THRESHOLD and uav.link_quality <= RETURN_LINK_QUALITY_THRESHOLD:
+            return "return_to_depot"
 
         if score < BACKUP_SCORE_THRESHOLD:
             return "backup"
 
         return "continue"
 
+
 # ============================================================
-# Event simulation
+# Simulation engine
 # ============================================================
 
-# global event list and counters (for simplicity)
-events: List[Tuple[float, int, str, Optional[UAV]]] = []
-event_counter = 0
-sim_time = 0.0
+class Simulator:
+    def __init__(self, env: GridEnvironment, uavs: List[UAV]):
+        self.env = env
+        self.uavs = uavs
+        self.time = 0.0
+        self.events: List[Tuple[float, int, str, Optional[int]]] = []
+        self.event_counter = 0
 
-def schedule(time: float, event_type: str, uav: Optional[UAV]) -> None:
-    global event_counter
-    event_counter += 1
-    heapq.heappush(events, (time, event_counter, event_type, uav))
+        self.metrics: Dict[str, float] = {
+            "backup_actions": 0,
+            "return_actions": 0,
+            "continue_actions": 0,
+            "crashes": 0,
+            "depot_deliveries": 0,
+            "successful_backups": 0,
+            "revenue_delivered_to_depot": 0.0,
+            "revenue_backed_up": 0.0,
+        }
 
-def schedule_initial_events(uavs: List[UAV]) -> None:
-    for uav in uavs:
-        schedule(0.0, "uav_arrival", uav)
-    schedule(0.0, "update_wp_risk", None)
-    schedule(0.0, "update_wp_revenue", None)
+    def schedule(self, time: float, event_type: str, uav_id: Optional[int] = None) -> None:
+        self.event_counter += 1
+        heapq.heappush(self.events, (time, self.event_counter, event_type, uav_id))
 
-def run_events(env: GridEnvironment, uavs: List[UAV]) -> None:
-    global sim_time
-    while events and sim_time < SIM_TIME:
-        sim_time, _, event_type, uav = heapq.heappop(events)
+    def get_uav(self, uav_id: int) -> UAV:
+        return next(u for u in self.uavs if u.uav_id == uav_id)
 
-        if event_type == "uav_arrival" and uav is not None:
-            idx = uav.current_wp_index()
-            print(f"[{sim_time:.1f}] UAV {uav.uav_id} arrived at WP {idx}")
+    def schedule_initial_events(self) -> None:
+        for uav in self.uavs:
+            self.schedule(0.0, "uav_arrival", uav.uav_id)
+        self.schedule(0.0, "update_wp_risk")
+        self.schedule(0.0, "update_wp_revenue")
 
-            travel_duration = sim_time - uav.last_event_time
-            uav.remaining_flight_time -= travel_duration
-            if uav.remaining_flight_time <= 0:
-                print(f"[{sim_time:.1f}] UAV {uav.uav_id} ran out of flight time and crashed!")
+    def attempt_backup(self, source: UAV) -> bool:
+        source_wp = self.env.waypoints[source.current_wp_index()]
+        candidates: List[Tuple[float, UAV]] = []
+
+        for other in self.uavs:
+            if other.uav_id == source.uav_id or not other.active:
                 continue
+            other_wp = self.env.waypoints[other.current_wp_index()]
+            dist = euclidean_distance(source_wp, other_wp)
+            if dist <= COMMUNICATION_RANGE:
+                candidates.append((other.remaining_flight_time, other))
 
-            uav.last_event_time = sim_time
+        if not candidates:
+            return False
 
-            uav.update_accumulated_risk(env, sim_time)
-            uav.update_accumulated_revenue(env, sim_time)
+        _, receiver = max(candidates, key=lambda x: x[0])
+        amount = source.accumulated_revenue
+        receiver.backed_up_revenue += amount
+        self.metrics["successful_backups"] += 1
+        self.metrics["revenue_backed_up"] += amount
+        print(f"[{self.time:.1f}] UAV {source.uav_id} backed up {amount:.1f} revenue to UAV {receiver.uav_id}")
+        return True
 
-            schedule(sim_time + UAV_HOVER_TIME, "uav_departure", uav)
+    def replan_to_depot(self, uav: UAV) -> None:
+        current_idx = uav.current_wp_index()
+        if current_idx == DEPOT_INDEX:
+            return
+        uav.sequence = [current_idx, DEPOT_INDEX]
+        uav.current_index = 0
+        uav.returning_to_depot = True
 
-        elif event_type == "uav_departure" and uav is not None:
-            idx = uav.current_wp_index()
-            print(f"[{sim_time:.1f}] UAV {uav.uav_id} departed from WP {idx}")
+    def deliver_at_depot(self, uav: UAV) -> None:
+        delivered = uav.accumulated_revenue + uav.backed_up_revenue
+        if delivered > 0:
+            uav.delivered_revenue += delivered
+            self.metrics["revenue_delivered_to_depot"] += delivered
+            self.metrics["depot_deliveries"] += 1
+            print(f"[{self.time:.1f}] UAV {uav.uav_id} delivered {delivered:.1f} revenue at depot")
 
-            hover_duration = sim_time - uav.last_event_time
-            uav.remaining_flight_time -= hover_duration
-            if uav.remaining_flight_time <= 0:
-                print(f"[{sim_time:.1f}] UAV {uav.uav_id} ran out of flight time and crashed!")
-                continue
+        uav.accumulated_revenue = 0.0
+        uav.backed_up_revenue = 0.0
+        uav.accumulated_risk = 0.0
+        uav.remaining_flight_time = MAX_FLIGHT_TIME
+        uav.health = 1.0
+        uav.collected_revenue = 0.0
+        uav.returning_to_depot = False
+        uav.active = False
 
-            next_idx = uav.next_wp_index()
-            if next_idx is None:
-                print(f"[{sim_time:.1f}] UAV {uav.uav_id} finished sequence")
-                continue
+    def run(self) -> None:
+        self.schedule_initial_events()
 
-            # update local state variables
-            uav.update_health()
-            uav.update_link_quality(env, uavs)
-            uav.update_collected_revenue()
+        while self.events and self.time < SIM_TIME:
+            self.time, _, event_type, uav_id = heapq.heappop(self.events)
 
-            print(f"[{sim_time:.1f}] UAV {uav.uav_id} health: {uav.health}, "
-                  f"link quality: {uav.link_quality*100:.1f}%, "
-                  f"collected revenue: {uav.collected_revenue}")
+            if event_type == "uav_arrival" and uav_id is not None:
+                uav = self.get_uav(uav_id)
+                if not uav.active:
+                    continue
 
-            action = BackupPolicy.decide_action(uav)
-            print(f"[{sim_time:.1f}] UAV {uav.uav_id} action: {action}")
+                wp_idx = uav.current_wp_index()
+                print(f"[{self.time:.1f}] UAV {uav.uav_id} arrived at WP {wp_idx}")
 
-            # For now, we only log the action and continue along the sequence.
-            # Later you can implement special behavior for "backup" and "return_to_depot".
-            curr_wp = env.waypoints[uav.current_wp_index()]
-            next_wp = env.waypoints[next_idx]
-            dt = travel_time(curr_wp, next_wp)
+                elapsed = self.time - uav.last_event_time
+                uav.remaining_flight_time -= elapsed
+                if uav.remaining_flight_time <= 0:
+                    self.metrics["crashes"] += 1
+                    uav.active = False
+                    print(f"[{self.time:.1f}] UAV {uav.uav_id} crashed")
+                    continue
 
-            uav.current_index += 1
-            uav.last_event_time = sim_time
+                uav.last_event_time = self.time
 
-            schedule(sim_time + dt, "uav_arrival", uav)
+                if wp_idx == DEPOT_INDEX and uav.returning_to_depot:
+                    self.deliver_at_depot(uav)
+                    continue
 
-        elif event_type == "update_wp_risk":
-            env.assign_random_risks()
-            schedule(sim_time + WP_RISK_UPDATE_INTERVAL, "update_wp_risk", None)
+                uav.update_accumulated_risk(self.env, self.time)
+                uav.update_accumulated_revenue(self.env, self.time)
+                self.schedule(self.time + UAV_HOVER_TIME, "uav_departure", uav.uav_id)
 
-        elif event_type == "update_wp_revenue":
-            env.assign_random_revenues()
-            schedule(sim_time + WP_REVENUE_UPDATE_INTERVAL, "update_wp_revenue", None)
+            elif event_type == "uav_departure" and uav_id is not None:
+                uav = self.get_uav(uav_id)
+                if not uav.active:
+                    continue
+
+                wp_idx = uav.current_wp_index()
+                print(f"[{self.time:.1f}] UAV {uav.uav_id} departed from WP {wp_idx}")
+
+                elapsed = self.time - uav.last_event_time
+                uav.remaining_flight_time -= elapsed
+                if uav.remaining_flight_time <= 0:
+                    self.metrics["crashes"] += 1
+                    uav.active = False
+                    print(f"[{self.time:.1f}] UAV {uav.uav_id} crashed")
+                    continue
+
+                uav.update_health()
+                uav.update_link_quality(self.env, self.uavs)
+                uav.update_collected_revenue()
+
+                print(
+                    f"[{self.time:.1f}] UAV {uav.uav_id} state -> health: {uav.health}, "
+                    f"link: {uav.link_quality:.2f}, revenue_state: {uav.collected_revenue}"
+                )
+
+                action = BackupPolicy.decide_action(uav)
+
+                if action == "return_to_depot":
+                    self.metrics["return_actions"] += 1
+                    self.replan_to_depot(uav)
+                    print(f"[{self.time:.1f}] UAV {uav.uav_id} action: RETURN_TO_DEPOT")
+                elif action == "backup":
+                    self.metrics["backup_actions"] += 1
+                    ok = self.attempt_backup(uav)
+                    if ok:
+                        print(f"[{self.time:.1f}] UAV {uav.uav_id} action: BACKUP")
+                    else:
+                        print(f"[{self.time:.1f}] UAV {uav.uav_id} action: BACKUP requested but no neighbor available")
+                else:
+                    self.metrics["continue_actions"] += 1
+                    print(f"[{self.time:.1f}] UAV {uav.uav_id} action: CONTINUE")
+
+                next_idx = uav.next_wp_index()
+                if next_idx is None:
+                    print(f"[{self.time:.1f}] UAV {uav.uav_id} finished sequence")
+                    uav.active = False
+                    continue
+
+                curr_wp = self.env.waypoints[uav.current_wp_index()]
+                next_wp = self.env.waypoints[next_idx]
+                dt = travel_time(curr_wp, next_wp)
+
+                uav.current_index += 1
+                uav.last_event_time = self.time
+                self.schedule(self.time + dt, "uav_arrival", uav.uav_id)
+
+            elif event_type == "update_wp_risk":
+                self.env.assign_random_risks()
+                self.schedule(self.time + WP_RISK_UPDATE_INTERVAL, "update_wp_risk")
+
+            elif event_type == "update_wp_revenue":
+                self.env.assign_random_revenues()
+                self.schedule(self.time + WP_REVENUE_UPDATE_INTERVAL, "update_wp_revenue")
+
+        self.print_summary()
+
+    def print_summary(self) -> None:
+        print("\n===== Simulation Summary =====")
+        print(f"Continue actions: {int(self.metrics['continue_actions'])}")
+        print(f"Backup actions: {int(self.metrics['backup_actions'])}")
+        print(f"Return-to-depot actions: {int(self.metrics['return_actions'])}")
+        print(f"Successful backups: {int(self.metrics['successful_backups'])}")
+        print(f"Depot deliveries: {int(self.metrics['depot_deliveries'])}")
+        print(f"Crashes: {int(self.metrics['crashes'])}")
+        print(f"Revenue backed up: {self.metrics['revenue_backed_up']:.1f}")
+        print(f"Revenue delivered to depot: {self.metrics['revenue_delivered_to_depot']:.1f}")
+
 
 # ============================================================
 # Main
@@ -358,7 +435,6 @@ def run_events(env: GridEnvironment, uavs: List[UAV]) -> None:
 
 if __name__ == "__main__":
     env = GridEnvironment(seed=42)
-
     env.assign_random_revenues()
     env.assign_random_risks()
 
@@ -366,9 +442,8 @@ if __name__ == "__main__":
     allocator.initialize_uavs()
     allocator.assign_random_sequences()
 
-    # print assigned sequences for debugging
     for uav in allocator.uavs:
-        print(f"UAV {uav.uav_id} sequence:", uav.sequence)
+        print(f"UAV {uav.uav_id} sequence: {uav.sequence}")
 
-    schedule_initial_events(allocator.uavs)
-    run_events(env, allocator.uavs)
+    sim = Simulator(env, allocator.uavs)
+    sim.run()
