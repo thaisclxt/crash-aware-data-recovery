@@ -1,0 +1,60 @@
+simulation:
+  time: 500
+  seed: 32
+  number_runs: 100
+  generate_random_targets: true
+
+environment:
+  total_uavs: 6
+  total_targets: 21
+  depot_index: 0
+
+grid:
+  width: 13
+  height: 13
+  spacing: 5
+
+uav:
+  speed: 16
+  max_flight_time: 1800 # in seconds
+  hover_time: 5 # in seconds
+  communication_range: 60
+
+waypoint:
+  revenue:
+    base: 30
+    min: 60
+    max: 600
+    update_interval: 20 # in seconds
+  risk:
+    base: 0
+    min: 0
+    max: 6
+    update_interval: 30 # in seconds
+
+mdp:
+  state:
+    health:
+      alpha: 0.6
+      beta: 0.4
+      weight: 0.5
+      threshold:
+        good: 0.7
+        warning: 0.4
+
+    link_quality:
+      weight: 0.3
+    
+    collected_revenue:
+      weight: 0.2
+      threshold:
+        low: 0.4
+        medium: 0.7
+  
+  action:
+    return:
+      threshold:
+        link_quality: 0.15
+        revenue: 0.5
+    backup:
+      threshold: 0.5
