@@ -1,13 +1,13 @@
 simulation:
-  time: 500
   seed: 32
   number_runs: 100
+  time_limit: 500
   generate_random_targets: true
 
 environment:
   total_uavs: 6
   total_targets: 21
-  depot_index: 0
+  depot_location: [0, 0]
 
 grid:
   width: 13
@@ -35,6 +35,7 @@ waypoint:
 mdp:
   state:
     health:
+      default: 1.0
       alpha: 0.6
       beta: 0.4
       weight: 0.5
@@ -43,9 +44,11 @@ mdp:
         warning: 0.4
 
     link_quality:
+      default: 1.0
       weight: 0.3
     
     collected_revenue:
+      default: 0.0
       weight: 0.2
       threshold:
         low: 0.4

@@ -6,7 +6,7 @@ from pathlib import Path
 
 @dataclass
 class SimulationConfig:
-    time: int
+    time_limit: int
     seed: int
     number_runs: int
     generate_random_targets: bool
@@ -19,7 +19,7 @@ class SimulationConfig:
 class EnvironmentConfig:
     total_uavs: int
     total_targets: int
-    depot_index: int
+    depot_location: tuple[float, float]
 
 
 @dataclass
@@ -61,6 +61,7 @@ class WaypointConfig:
 
 @dataclass
 class HealthStateConfig:
+    default: float
     alpha: float
     beta: float
     weight: float
@@ -70,11 +71,13 @@ class HealthStateConfig:
 
 @dataclass
 class LinkQualityStateConfig:
+    default: float
     weight: float
 
 
 @dataclass
 class CollectedRevenueStateConfig:
+    default: float
     weight: float
     threshold_low: float
     threshold_medium: float
@@ -157,7 +160,7 @@ def load_configuration(path: Path) -> Config:
 
     return Config(
         simulation=SimulationConfig(
-            time=simulation.get("time"),
+            time_limit=simulation.get("time_limit"),
             seed=simulation.get("seed"),
             number_runs=simulation.get("number_runs"),
             generate_random_targets=simulation.get("generate_random_targets"),
@@ -165,7 +168,7 @@ def load_configuration(path: Path) -> Config:
         environment=EnvironmentConfig(
             total_uavs=environment.get("total_uavs"),
             total_targets=environment.get("total_targets"),
-            depot_index=environment.get("depot_index"),
+            depot_location=environment.get("depot_location"),
         ),
         grid=GridConfig(
             width=grid.get("width"),
@@ -195,6 +198,7 @@ def load_configuration(path: Path) -> Config:
         mdp=MDPConfig(
             state=MDPStateConfig(
                 health=HealthStateConfig(
+                    default=health.get("default"),
                     alpha=health.get("alpha"),
                     beta=health.get("beta"),
                     weight=health.get("weight"),
@@ -202,9 +206,11 @@ def load_configuration(path: Path) -> Config:
                     threshold_warning=health_threshold.get("warning"),
                 ),
                 link_quality=LinkQualityStateConfig(
+                    default=link_quality.get("default"),
                     weight=link_quality.get("weight"),
                 ),
                 collected_revenue=CollectedRevenueStateConfig(
+                    default=collected_revenue.get("default"),
                     weight=collected_revenue.get("weight"),
                     threshold_low=collected_revenue_threshold.get("low"),
                     threshold_medium=collected_revenue_threshold.get("medium"),

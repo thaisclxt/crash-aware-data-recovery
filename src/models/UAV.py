@@ -1,58 +1,78 @@
-from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from ..config import Config
+from ..environment.grid_environment import GridEnvironment
 from ..utils import euclidean_distance
 
 
-from .GridEnvironment import GridEnvironment
-
-
-@dataclass
 class UAV:
-    uav_id: int
+    def __init__(self, uav_id: int, sequence: List[int], config: Config) -> None:
+        self.uav_id = uav_id
+        self.sequence = sequence
+        self.config = config
 
-    sequence: List[int] = field(default_factory=list)
-    current_index: int = 0
-    last_event_time: float = 0.0
+        self.sequence_index: int = -1
+        self.current_waypoint_id: Optional[int] = None
 
-    accumulated_risk: float = 0.0
-    accumulated_revenue: float = 0.0
-    remaining_flight_time: float = 0.0
+        self.remaining_flight_time: float = config.uav.max_flight_time
+        self.health: float = config.mdp.state.health.default
+        self.link_quality: float = config.mdp.state.link_quality.default
+        self.collected_revenue: float = config.mdp.state.collected_revenue.default
 
-    health: float = 1.0
-    link_quality: float = 1.0
-    collected_revenue: float = 0.0
+        self.last_event_time: float = 0.0
+        self.accumulated_risk: float = 0.0
+        self.accumulated_revenue: float = 0.0
+        self.delivered_revenue: float = 0.0
+        self.backed_up_revenue: float = 0.0
 
-    delivered_revenue: float = 0.0
-    backed_up_revenue: float = 0.0
+        self.returning_to_depot: bool = False
+        self.active: bool = True
 
-    returning_to_depot: bool = False
-    active: bool = True
+    def current_waypoint(self, env: GridEnvironment):
+        if self.current_waypoint_id is None:
+            return None
+        return env.get_waypoint(self.current_waypoint_id)
 
-    def initialize_from_config(self, config: Config) -> None:
-        self.remaining_flight_time = config.uav.max_flight_time
+    def current_location(self, env: GridEnvironment) -> Tuple[float, float]:
+        wp = self.current_waypoint(env)
+        if wp is None:
+            return self.config.environment.depot_location
+        return wp.location
 
-    def current_wp_index(self) -> int:
-        return self.sequence[self.current_index]
+    def peek_next_waypoint_id(self) -> Optional[int]:
+        next_index = self.sequence_index + 1
+        if next_index >= len(self.sequence):
+            return None
+        return self.sequence[next_index]
 
-    def next_wp_index(self) -> Optional[int]:
-        if self.current_index + 1 < len(self.sequence):
-            return self.sequence[self.current_index + 1]
-        return None
+    def advance_to_next_waypoint(self) -> Optional[int]:
+        next_waypoint_id = self.peek_next_waypoint_id()
+        if next_waypoint_id is None:
+            return None
+
+        self.sequence_index += 1
+        self.current_waypoint_id = next_waypoint_id
+        return next_waypoint_id
+
+    def has_finished_sequence(self) -> bool:
+        return self.peek_next_waypoint_id() is None
 
     def update_accumulated_risk(self, env: GridEnvironment) -> float:
-        wp_idx = self.current_wp_index()
-        wp = env.waypoints[wp_idx]
+        wp = self.current_waypoint(env)
+        if wp is None:
+            return 0.0
+
         self.accumulated_risk += wp.risk
         return wp.risk
 
-    def update_accumulated_revenue(self, env: GridEnvironment, depot_index: int) -> float:
-        wp_idx = self.current_wp_index()
-        if wp_idx == depot_index:
+    def update_accumulated_revenue(self, env: GridEnvironment) -> float:
+        wp = self.current_waypoint(env)
+        if wp is None:
             return 0.0
 
-        wp = env.waypoints[wp_idx]
+        if wp.location == self.config.environment.depot_location:
+            return 0.0
+
         self.accumulated_revenue += wp.revenue
         return wp.revenue
 
@@ -88,14 +108,15 @@ class UAV:
         communication_range: float,
     ) -> None:
         indicators: List[int] = []
-        my_wp = env.waypoints[self.current_wp_index()]
+
+        my_location = self.current_location(env)
 
         for other in all_uavs:
             if other.uav_id == self.uav_id or not other.active:
                 continue
 
-            other_wp = env.waypoints[other.current_wp_index()]
-            dist = euclidean_distance(my_wp, other_wp)
+            other_location = other.current_location(env)
+            dist = euclidean_distance(my_location, other_location)
             indicators.append(1 if dist <= communication_range else 0)
 
         self.link_quality = sum(indicators) / len(indicators) if indicators else 0.0
@@ -120,3 +141,23 @@ class UAV:
             self.collected_revenue = 0.5
         else:
             self.collected_revenue = 1.0
+
+    def __repr__(self) -> str:
+        return (
+            f"UAV(uav_id={self.uav_id}, "
+            f"current_waypoint_id={self.current_waypoint_id}, "
+            f"sequence_index={self.sequence_index}, "
+            f"sequence={self.sequence})"
+        )
+    
+    def print_states(self) -> None:
+        """Print UAV state variables in a clean table format."""
+        print(f"\n--- UAV {self.uav_id} State ---")
+        print(f"{'State Variable':<30} {'Value':>10}")
+        print("-" * 55)
+        print(f"{'Health':<30} {self.health:>10.2f}")
+        print(f"{'Link Quality':<30} {self.link_quality:>10.2f}")
+        print(f"{'Collected Revenue':<30} {self.collected_revenue:>10.2f}")
+        print(f"{'Remaining Flight Time':<30} {self.remaining_flight_time:>10.2f}")
+        print(f"{'Accumulated Risk':<30} {self.accumulated_risk:>10.2f}")
+        print(f"{'Accumulated Revenue':<30} {self.accumulated_revenue:>10.2f}")
