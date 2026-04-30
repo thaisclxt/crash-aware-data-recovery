@@ -177,8 +177,8 @@ class Simulator:
             max_wp_risk=self.config.waypoint.risk.max,
             alpha=self.config.mdp.state.health.alpha,
             beta=self.config.mdp.state.health.beta,
-            good_threshold=self.config.mdp.state.health.threshold_good,
-            warning_threshold=self.config.mdp.state.health.threshold_warning,
+            good_threshold=self.config.mdp.state.health.threshold.good,
+            warning_threshold=self.config.mdp.state.health.threshold.warning,
         )
 
         uav.update_link_quality(
@@ -190,8 +190,8 @@ class Simulator:
         uav.update_collected_revenue(
             total_targets=self.config.environment.total_targets,
             max_wp_revenue=self.config.waypoint.revenue.max,
-            low_threshold=self.config.mdp.state.collected_revenue.threshold_low,
-            medium_threshold=self.config.mdp.state.collected_revenue.threshold_medium,
+            low_threshold=self.config.mdp.state.collected_revenue.threshold.low,
+            medium_threshold=self.config.mdp.state.collected_revenue.threshold.medium,
         )
 
     def _continue_to_next_waypoint(self, uav: UAV) -> None:

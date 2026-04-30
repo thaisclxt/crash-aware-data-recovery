@@ -60,13 +60,18 @@ class WaypointConfig:
 
 
 @dataclass
+class HealthThresholdConfig:
+    good: float
+    warning: float
+
+
+@dataclass
 class HealthStateConfig:
     default: float
     alpha: float
     beta: float
     weight: float
-    threshold_good: float
-    threshold_warning: float
+    threshold: HealthThresholdConfig
 
 
 @dataclass
@@ -76,11 +81,16 @@ class LinkQualityStateConfig:
 
 
 @dataclass
+class CollectedRevenueThresholdConfig:
+    low: float
+    medium: float
+
+
+@dataclass
 class CollectedRevenueStateConfig:
     default: float
     weight: float
-    threshold_low: float
-    threshold_medium: float
+    threshold: CollectedRevenueThresholdConfig
 
 
 @dataclass
@@ -158,6 +168,8 @@ def load_configuration(path: Path) -> Config:
 
     backup_action = mdp_action.get("backup", {})
 
+    depot_location = tuple(environment.get("depot_location", (0.0, 0.0)))
+
     return Config(
         simulation=SimulationConfig(
             time_limit=simulation.get("time_limit"),
@@ -168,7 +180,7 @@ def load_configuration(path: Path) -> Config:
         environment=EnvironmentConfig(
             total_uavs=environment.get("total_uavs"),
             total_targets=environment.get("total_targets"),
-            depot_location=environment.get("depot_location"),
+            depot_location=depot_location,
         ),
         grid=GridConfig(
             width=grid.get("width"),
@@ -202,8 +214,10 @@ def load_configuration(path: Path) -> Config:
                     alpha=health.get("alpha"),
                     beta=health.get("beta"),
                     weight=health.get("weight"),
-                    threshold_good=health_threshold.get("good"),
-                    threshold_warning=health_threshold.get("warning"),
+                    threshold=HealthThresholdConfig(
+                        good=health_threshold.get("good"),
+                        warning=health_threshold.get("warning"),
+                    ),
                 ),
                 link_quality=LinkQualityStateConfig(
                     default=link_quality.get("default"),
@@ -212,8 +226,10 @@ def load_configuration(path: Path) -> Config:
                 collected_revenue=CollectedRevenueStateConfig(
                     default=collected_revenue.get("default"),
                     weight=collected_revenue.get("weight"),
-                    threshold_low=collected_revenue_threshold.get("low"),
-                    threshold_medium=collected_revenue_threshold.get("medium"),
+                    threshold=CollectedRevenueThresholdConfig(
+                        low=collected_revenue_threshold.get("low"),
+                        medium=collected_revenue_threshold.get("medium"),
+                    ),
                 ),
             ),
             action=MDPActionConfig(

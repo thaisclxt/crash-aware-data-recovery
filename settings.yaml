@@ -5,8 +5,8 @@ simulation:
   generate_random_targets: true
 
 environment:
-  total_uavs: 6
-  total_targets: 21
+  total_uavs: 3
+  total_targets: 5
   depot_location: [0, 0]
 
 grid:
@@ -15,8 +15,8 @@ grid:
   spacing: 5
 
 uav:
-  speed: 16
-  max_flight_time: 1800 # in seconds
+  speed: 10
+  max_flight_time: 20 # in seconds
   hover_time: 5 # in seconds
   communication_range: 60
 

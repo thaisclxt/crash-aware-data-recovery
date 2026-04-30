@@ -150,14 +150,35 @@ class UAV:
             f"sequence={self.sequence})"
         )
     
+    def health_label(self) -> str:
+        good_threshold = self.config.mdp.state.health.threshold.good
+        warning_threshold = self.config.mdp.state.health.threshold.warning
+
+        if self.health >= good_threshold:
+            return "good"
+        if self.health >= warning_threshold:
+            return "warning"
+        return "critical"
+
+
+    def collected_revenue_label(self) -> str:
+        medium_threshold = self.config.mdp.state.collected_revenue.threshold.medium
+        low_threshold = self.config.mdp.state.collected_revenue.threshold.low
+
+        if self.collected_revenue >= medium_threshold:
+            return "high"
+        if self.collected_revenue >= low_threshold:
+            return "medium"
+        return "low"
+    
     def print_states(self) -> None:
         """Print UAV state variables in a clean table format."""
         print(f"\n--- UAV {self.uav_id} State ---")
         print(f"{'State Variable':<30} {'Value':>10}")
         print("-" * 55)
-        print(f"{'Health':<30} {self.health:>10.2f}")
-        print(f"{'Link Quality':<30} {self.link_quality:>10.2f}")
-        print(f"{'Collected Revenue':<30} {self.collected_revenue:>10.2f}")
+        print(f"{'Health':<30} {self.health_label():>10}")
+        print(f"{'Link Quality':<30} {self.link_quality:>10.0%}")
+        print(f"{'Collected Revenue':<30} {self.collected_revenue_label():>10}")
         print(f"{'Remaining Flight Time':<30} {self.remaining_flight_time:>10.2f}")
         print(f"{'Accumulated Risk':<30} {self.accumulated_risk:>10.2f}")
         print(f"{'Accumulated Revenue':<30} {self.accumulated_revenue:>10.2f}")
