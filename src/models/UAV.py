@@ -2,6 +2,7 @@ from typing import List, Optional, Tuple
 
 from ..config import Config
 from ..environment.grid_environment import GridEnvironment
+from ..models.waypoint import Waypoint
 from ..utils import euclidean_distance
 
 
@@ -21,9 +22,10 @@ class UAV:
 
         self.last_event_time: float = 0.0
         self.accumulated_risk: int = 0
-        self.accumulated_revenue: float = 0.0
-        self.delivered_revenue: float = 0.0
-        self.backed_up_revenue: float = 0.0
+        self.accumulated_revenue: float = 0.0 # currently carried this mission
+        self.delivered_revenue: float = 0.0 # lifetime delivered across missions
+        self.backed_up_revenue: float = 0.0 # current mission only
+        self.total_backed_up_revenue: float = 0.0 # lifetime across missions
 
         self.returning_to_depot: bool = False
         self.active: bool = True
@@ -36,7 +38,9 @@ class UAV:
         self.travel_start_time: Optional[float] = None
         self.travel_end_time: Optional[float] = None
 
-    def current_waypoint(self, env: GridEnvironment):
+        self.completed_missions: int = 0
+
+    def current_waypoint(self, env: GridEnvironment) -> Optional[Waypoint]:
         if self.current_waypoint_id is None:
             return None
         return env.get_waypoint(self.current_waypoint_id)
@@ -188,7 +192,9 @@ class UAV:
             self.collected_revenue = 0.0
             return
 
-        revenue_fraction = min(1.0, self.accumulated_revenue / max_possible_revenue)
+        # Count both carried and backed-up revenue for this mission
+        mission_revenue = self.accumulated_revenue + self.backed_up_revenue
+        revenue_fraction = min(1.0, mission_revenue / max_possible_revenue)
 
         if revenue_fraction < low_threshold:
             self.collected_revenue = 0.0
@@ -227,13 +233,17 @@ class UAV:
         return "low"
     
     def print_states(self) -> None:
-        """Print UAV state variables in a clean table format."""
         print(f"\n--- UAV {self.uav_id} State ---")
         print(f"{'State Variable':<30} {'Value':>10}")
         print("-" * 55)
-        print(f"{'Health':<30} {self.health_label():>10}")
-        print(f"{'Link Quality':<30} {self.link_quality:>10.0%}")
-        print(f"{'Collected Revenue':<30} {self.collected_revenue_label():>10}")
-        print(f"{'Remaining Flight Time':<30} {self.remaining_flight_time:>10.2f}")
-        print(f"{'Accumulated Risk':<30} {self.accumulated_risk:>10.2f}")
-        print(f"{'Accumulated Revenue':<30} {self.accumulated_revenue:>10.2f}")
+
+        print(
+            f"{'Health':<30} {self.health_label():>10}\n"
+            f"{'Link Quality':<30} {self.link_quality:>10.0%}\n"
+            f"{'Collected Revenue':<30} {self.collected_revenue_label():>10}\n"
+            f"{'Remaining Flight Time':<30} {self.remaining_flight_time:>10.2f}\n"
+            f"{'Accumulated Risk':<30} {self.accumulated_risk:>10.2f}\n"
+            f"{'Accumulated Revenue':<30} {self.accumulated_revenue:>10.2f}\n"
+            f"{'Completed Missions':<30} {self.completed_missions:>10}\n"
+            f"{'Total Backed-Up Revenue':<30} {self.total_backed_up_revenue:>10.2f}\n"
+        )

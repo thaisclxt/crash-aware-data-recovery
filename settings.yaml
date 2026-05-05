@@ -1,7 +1,7 @@
 simulation:
   seed: 32
   number_runs: 100
-  time_limit: 500
+  time_limit: 80
   generate_random_targets: true
 
 environment:
@@ -16,7 +16,7 @@ grid:
 
 uav:
   speed: 10
-  max_flight_time: 40 # in seconds
+  max_flight_time: 20 # in seconds
   hover_time: 5 # in seconds
   communication_range: 60
 

@@ -6,7 +6,8 @@ from ..config import Config
 from ..environment.grid_environment import GridEnvironment
 from ..models.uav import UAV
 from ..policy.backup_policy import BackupPolicy
-from ..utils import travel_time, calculate_max_cycles, print_environment
+from ..utils import travel_time, calculate_max_cycles
+from ..display import print_environment
 from .event import Event
 from .metrics import Metrics
 
@@ -52,17 +53,13 @@ class Simulator:
 
     def schedule_initial_events(self) -> None:
         for uav in self.uavs.values():
-            self._schedule_initial_arrival(uav)
+            if self.time < self.config.simulation.time_limit:
+                self._schedule_initial_arrival(uav)
 
         self.schedule(self.config.waypoint.risk.update_interval, "update_wp_risk")
         self.schedule(self.config.waypoint.revenue.update_interval, "update_wp_revenue")
 
     def run(self) -> None:
-        # Calculate max_cycles for each UAV
-        for uav in self.uavs.values():
-            uav.max_cycles = calculate_max_cycles(uav, self.env, self.config)
-            self._log(f"UAV {uav.uav_id} planned for {uav.max_cycles} cycles")
-
         self.schedule_initial_events()
 
         while self.events and self.time < self.config.simulation.time_limit:
@@ -140,8 +137,7 @@ class Simulator:
 
         self._update_uav_decision_state(uav)
 
-        if hasattr(uav, "print_states"):
-            uav.print_states()
+        uav.print_states()
 
         action = self.policy.decide_action(uav)
         self.metrics.record_action(action)
@@ -182,10 +178,33 @@ class Simulator:
             uav.active = False
             self.metrics.record_crash()
             self._log(f"UAV {uav.uav_id} crashed")
+
+            self._replace_crashed_uav(uav)
             return False
 
         uav.last_event_time = self.time
         return True
+    
+    def _replace_crashed_uav(self, crashed_uav: UAV) -> None:
+        if self.time >= self.config.simulation.time_limit:
+            return
+
+        new_uav = UAV(
+            uav_id=crashed_uav.uav_id,
+            sequence=crashed_uav.sequence,
+            config=self.config,
+        )
+
+        new_uav.max_cycles = calculate_max_cycles(new_uav, self.env, self.config)
+
+        # Preserve lifetime per-UAV accounting if you want same logical UAV identity
+        new_uav.delivered_revenue = crashed_uav.delivered_revenue
+        new_uav.total_backed_up_revenue = crashed_uav.total_backed_up_revenue
+
+        self.uavs[new_uav.uav_id] = new_uav
+
+        self._log(f"Replacement UAV {new_uav.uav_id} launched")
+        self._schedule_initial_arrival(new_uav)
 
     def _update_uav_decision_state(self, uav: UAV) -> None:
         uav.update_health(
@@ -261,12 +280,15 @@ class Simulator:
     def _handle_backup(self, uav: UAV) -> None:
         self._log(f"UAV {uav.uav_id} selected action: backup")
 
+        backup_amount = uav.accumulated_revenue
+
         self.metrics.record_backup(
-            revenue=uav.accumulated_revenue,
+            revenue=backup_amount,
             success=True,
         )
 
-        uav.backed_up_revenue += uav.accumulated_revenue
+        uav.backed_up_revenue += backup_amount
+        uav.total_backed_up_revenue += backup_amount
         uav.accumulated_revenue = 0.0
 
         self._continue_to_next_waypoint(uav)
@@ -309,13 +331,36 @@ class Simulator:
             f"{delivered_amount:.2f}"
         )
 
+        uav.completed_missions += 1
+        self.metrics.record_completed_mission()
+
+        self._reset_uav_for_new_mission(uav)
+
+        if self.time < self.config.simulation.time_limit:
+            self._log(f"UAV {uav.uav_id} starting a new mission")
+            self._schedule_initial_arrival(uav)
+
+    def _reset_uav_for_new_mission(self, uav: UAV) -> None:
+        uav.sequence_index = -1
+        uav.current_waypoint_id = None
+
+        uav.remaining_flight_time = self.config.uav.max_flight_time
+        uav.health = self.config.mdp.state.health.default
+        uav.link_quality = self.config.mdp.state.link_quality.default
+        uav.collected_revenue = self.config.mdp.state.collected_revenue.default
+
+        uav.last_event_time = self.time
+        uav.accumulated_risk = 0
         uav.accumulated_revenue = 0.0
         uav.backed_up_revenue = 0.0
-        uav.accumulated_risk = 0.0
-        uav.returning_to_depot = False
-        uav.active = False
 
-        self.metrics.record_completed_mission()
+        uav.returning_to_depot = False
+        uav.active = True
+
+        uav.completed_cycles = 0
+        uav.max_cycles = calculate_max_cycles(uav, self.env, self.config)
+
+        uav.finish_travel()
 
     def _log(self, message: str) -> None:
         print(f"[{self.time:.1f}] {message}")

@@ -18,16 +18,6 @@ def travel_time(a: Location, b: Location, speed: float) -> float:
     return euclidean_distance(a, b) / speed
 
 
-def print_environment(env: GridEnvironment) -> None:
-    print(f"{'Waypoint ID':<15} {'Location':<15} {'Revenue':<15} {'Risk':<5}")
-    print("-" * 55)
-
-    for wp in sorted(env.target_waypoints, key=lambda wp: wp.w_id):
-        print(f"{wp.w_id:<15} {str(wp.location):<15} {wp.revenue:<15.2f} {wp.risk:<5}")
-
-    print()
-
-
 def calculate_max_cycles(uav: UAV, env: GridEnvironment, config: Config) -> int:
     """
     Calculate maximum number of complete cycles (mj) a UAV can perform
@@ -62,5 +52,9 @@ def calculate_max_cycles(uav: UAV, env: GridEnvironment, config: Config) -> int:
     
     # Calculate max complete cycles
     max_cycles = int(available_time / one_cycle_time)
+
+    if max_cycles < 1:
+        # Not enough time for even one cycle
+        return 0
     
-    return max(1, max_cycles)  # At least 1 cycle
+    return max_cycles
