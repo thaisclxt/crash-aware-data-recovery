@@ -16,7 +16,7 @@ grid:
 
 uav:
   speed: 10
-  max_flight_time: 20 # in seconds
+  max_flight_time: 40 # in seconds
   hover_time: 5 # in seconds
   communication_range: 60
 

@@ -3,6 +3,7 @@ import random
 from pathlib import Path
 
 from src.config import load_configuration
+from src.utils import print_environment
 from src.simulator.simulator import Simulator
 
 from src.environment.grid_environment import GridEnvironment
@@ -17,11 +18,7 @@ def main() -> None:
 
     env = GridEnvironment(config=config)
 
-    print(f"{'Waypoint ID':<15} {'Location':<15} {'Revenue':<15} {'Risk':<5}")
-    print("-" * 55)
-
-    for wp in sorted(env.target_waypoints, key=lambda wp: wp.w_id):
-        print(f"{wp.w_id:<15} {str(wp.location):<15} {wp.revenue:<15.2f} {wp.risk:<5}")
+    print_environment(env)
 
     allocator = TaskAllocator(env=env)
     allocator.initialize_uavs()
@@ -47,7 +44,7 @@ def main() -> None:
     print("-" * 55)
 
     for key, value in vars(sim.metrics).items():
-        print(f"{key:<35} {value:>10}")
+        print(f"{key:<35} {value:>10.2f}")
 
 
 if __name__ == "__main__":

@@ -5,6 +5,8 @@ from typing import Dict, List
 from ..config import Config
 from ..models.waypoint import Waypoint
 
+from ..utils import print_environment
+
 
 class GridEnvironment:
     def __init__(self, config: Config) -> None:
@@ -64,6 +66,10 @@ class GridEnvironment:
         for wp in self.target_waypoints:
             wp.revenue = random.uniform(min_revenue, max_revenue)
 
+        # print_environment(self)
+
     def assign_random_risks(self) -> None:
         for wp in self.target_waypoints:
             wp.risk = random.choice([0, 1])
+
+        # print_environment(self)

@@ -14,20 +14,20 @@ class BackupPolicy:
             + self.config.mdp.state.collected_revenue.weight * uav.collected_revenue
         )
 
-    def should_return_to_depot(self, uav: UAV) -> bool:
-        """Check if UAV should immediately return to depot."""
-        # Critical: health depleted
-        if uav.health <= 0.0:
-            return True
+    # def should_return_to_depot(self, uav: UAV) -> bool:
+    #     """Check if UAV should immediately return to depot."""
+    #     # Critical: health depleted
+    #     if uav.health <= 0.0:
+    #         return True
 
-        # Mission-complete condition: high revenue + poor link
-        if (
-            uav.collected_revenue >= self.config.mdp.action.return_.threshold.revenue
-            and uav.link_quality <= self.config.mdp.action.return_.threshold.link_quality
-        ):
-            return True
+    #     # Mission-complete condition: high revenue + poor link
+    #     if (
+    #         uav.collected_revenue >= self.config.mdp.action.return_.threshold.revenue
+    #         and uav.link_quality <= self.config.mdp.action.return_.threshold.link_quality
+    #     ):
+    #         return True
 
-        return False
+    #     return False
 
     def should_backup(self, uav: UAV) -> bool:
         """Check if UAV should perform backup action."""
@@ -46,8 +46,8 @@ class BackupPolicy:
         Returns:
             "return_to_depot", "backup", or "continue"
         """
-        if self.should_return_to_depot(uav):
-            return "return_to_depot"
+        # if self.should_return_to_depot(uav):
+        #     return "return_to_depot"
 
         if self.should_backup(uav):
             return "backup"

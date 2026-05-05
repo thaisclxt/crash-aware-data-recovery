@@ -20,7 +20,7 @@ class UAV:
         self.collected_revenue: float = config.mdp.state.collected_revenue.default
 
         self.last_event_time: float = 0.0
-        self.accumulated_risk: float = 0.0
+        self.accumulated_risk: int = 0
         self.accumulated_revenue: float = 0.0
         self.delivered_revenue: float = 0.0
         self.backed_up_revenue: float = 0.0
@@ -28,12 +28,66 @@ class UAV:
         self.returning_to_depot: bool = False
         self.active: bool = True
 
+        self.completed_cycles: int = 0
+        self.max_cycles: int = 1
+
+        self.travel_origin: Optional[Tuple[float, float]] = None
+        self.travel_destination: Optional[Tuple[float, float]] = None
+        self.travel_start_time: Optional[float] = None
+        self.travel_end_time: Optional[float] = None
+
     def current_waypoint(self, env: GridEnvironment):
         if self.current_waypoint_id is None:
             return None
         return env.get_waypoint(self.current_waypoint_id)
 
-    def current_location(self, env: GridEnvironment) -> Tuple[float, float]:
+    def start_travel(
+        self,
+        origin: Tuple[float, float],
+        destination: Tuple[float, float],
+        start_time: float,
+        end_time: float,
+    ) -> None:
+        self.travel_origin = origin
+        self.travel_destination = destination
+        self.travel_start_time = start_time
+        self.travel_end_time = end_time
+
+    def finish_travel(self) -> None:
+        self.travel_origin = None
+        self.travel_destination = None
+        self.travel_start_time = None
+        self.travel_end_time = None
+
+    def is_traveling(self, now: float) -> bool:
+        return (
+            self.travel_origin is not None
+            and self.travel_destination is not None
+            and self.travel_start_time is not None
+            and self.travel_end_time is not None
+            and self.travel_start_time <= now < self.travel_end_time
+        )
+
+    def current_location(
+        self,
+        env: GridEnvironment,
+        now: Optional[float] = None,
+    ) -> Tuple[float, float]:
+        if now is not None and self.is_traveling(now):
+            ox, oy = self.travel_origin
+            dx, dy = self.travel_destination
+
+            duration = self.travel_end_time - self.travel_start_time
+            if duration <= 0:
+                return self.travel_destination
+
+            progress = (now - self.travel_start_time) / duration
+            progress = max(0.0, min(1.0, progress))
+
+            x = ox + progress * (dx - ox)
+            y = oy + progress * (dy - oy)
+            return (x, y)
+
         wp = self.current_waypoint(env)
         if wp is None:
             return self.config.environment.depot_location
@@ -57,10 +111,10 @@ class UAV:
     def has_finished_sequence(self) -> bool:
         return self.peek_next_waypoint_id() is None
 
-    def update_accumulated_risk(self, env: GridEnvironment) -> float:
+    def update_accumulated_risk(self, env: GridEnvironment) -> int:
         wp = self.current_waypoint(env)
         if wp is None:
-            return 0.0
+            return 0
 
         self.accumulated_risk += wp.risk
         return wp.risk
@@ -106,16 +160,17 @@ class UAV:
         env: GridEnvironment,
         all_uavs: List["UAV"],
         communication_range: float,
+        now: float,
     ) -> None:
         indicators: List[int] = []
 
-        my_location = self.current_location(env)
+        my_location = self.current_location(env, now)
 
         for other in all_uavs:
             if other.uav_id == self.uav_id or not other.active:
                 continue
 
-            other_location = other.current_location(env)
+            other_location = other.current_location(env, now)
             dist = euclidean_distance(my_location, other_location)
             indicators.append(1 if dist <= communication_range else 0)
 

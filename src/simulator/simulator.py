@@ -6,7 +6,7 @@ from ..config import Config
 from ..environment.grid_environment import GridEnvironment
 from ..models.uav import UAV
 from ..policy.backup_policy import BackupPolicy
-from ..utils import travel_time
+from ..utils import travel_time, calculate_max_cycles, print_environment
 from .event import Event
 from .metrics import Metrics
 
@@ -34,6 +34,7 @@ class Simulator:
             "uav_departure": self._handle_uav_departure,
             "update_wp_risk": self._handle_update_wp_risk,
             "update_wp_revenue": self._handle_update_wp_revenue,
+            "depot_arrival": self._handle_depot_arrival,
         }
 
     def schedule(self, time: float, event_type: str, uav_id: Optional[int] = None) -> None:
@@ -53,10 +54,15 @@ class Simulator:
         for uav in self.uavs.values():
             self._schedule_initial_arrival(uav)
 
-        self.schedule(0.0, "update_wp_risk")
-        self.schedule(0.0, "update_wp_revenue")
+        self.schedule(self.config.waypoint.risk.update_interval, "update_wp_risk")
+        self.schedule(self.config.waypoint.revenue.update_interval, "update_wp_revenue")
 
     def run(self) -> None:
+        # Calculate max_cycles for each UAV
+        for uav in self.uavs.values():
+            uav.max_cycles = calculate_max_cycles(uav, self.env, self.config)
+            self._log(f"UAV {uav.uav_id} planned for {uav.max_cycles} cycles")
+
         self.schedule_initial_events()
 
         while self.events and self.time < self.config.simulation.time_limit:
@@ -82,6 +88,13 @@ class Simulator:
 
         dt = travel_time(depot_location, first_wp.location, self.config.uav.speed)
 
+        uav.start_travel(
+            origin=depot_location,
+            destination=first_wp.location,
+            start_time=self.time,
+            end_time=self.time + dt,
+        )
+
         uav.advance_to_next_waypoint()
         self.schedule(self.time + dt, "uav_arrival", uav.uav_id)
 
@@ -97,12 +110,14 @@ class Simulator:
 
         if not self._advance_uav_time(uav):
             return
+        
+        uav.finish_travel()
 
         risk_added = uav.update_accumulated_risk(self.env)
         revenue_added = uav.update_accumulated_revenue(self.env)
 
-        self.metrics.add_risk_accumulated(risk_added)
-        self.metrics.add_revenue_collected(revenue_added)
+        self.metrics.record_risk_accumulated(risk_added)
+        self.metrics.record_revenue_collected(revenue_added)
 
         self.schedule(
             self.time + self.config.uav.hover_time,
@@ -131,21 +146,19 @@ class Simulator:
         action = self.policy.decide_action(uav)
         self.metrics.record_action(action)
 
-        if action == "return_to_depot":
-            self._handle_return_to_depot(uav)
-            return
-
         if action == "backup":
             self._handle_backup(uav)
             return
-
-        if action != "continue":
+        elif action == "continue":
+            self._continue_to_next_waypoint(uav)
+        else:
             raise ValueError(f"Unknown action: {action}")
-
-        self._continue_to_next_waypoint(uav)
 
     def _handle_update_wp_risk(self, event: Event) -> None:
         self.env.assign_random_risks()
+
+        print_environment(self.env)
+
         self.schedule(
             self.time + self.config.waypoint.risk.update_interval,
             "update_wp_risk",
@@ -153,6 +166,9 @@ class Simulator:
 
     def _handle_update_wp_revenue(self, event: Event) -> None:
         self.env.assign_random_revenues()
+
+        print_environment(self.env)
+
         self.schedule(
             self.time + self.config.waypoint.revenue.update_interval,
             "update_wp_revenue",
@@ -185,6 +201,7 @@ class Simulator:
             env=self.env,
             all_uavs=list(self.uavs.values()),
             communication_range=self.config.uav.communication_range,
+            now=self.time,
         )
 
         uav.update_collected_revenue(
@@ -198,24 +215,107 @@ class Simulator:
         next_wp_id = uav.peek_next_waypoint_id()
 
         if next_wp_id is None:
-            self._log(f"UAV {uav.uav_id} finished sequence")
-            uav.active = False
-            self.metrics.record_completed_sequence()
-            return
+            uav.completed_cycles += 1
 
-        current_location = uav.current_location(self.env)
+            self._log(
+                f"UAV {uav.uav_id} completed cycle "
+                f"{uav.completed_cycles}/{uav.max_cycles}"
+            )
+
+            if uav.completed_cycles >= uav.max_cycles:
+                self._log(
+                    f"UAV {uav.uav_id} completed all {uav.max_cycles} cycles, "
+                    f"returning to depot"
+                )
+                self._return_to_depot(uav)
+                return
+
+            uav.sequence_index = -1
+            uav.current_waypoint_id = None
+            next_wp_id = uav.peek_next_waypoint_id()
+
+            if next_wp_id is None:
+                self._log(f"UAV {uav.uav_id} has empty sequence, returning to depot")
+                self._return_to_depot(uav)
+                return
+
+            self._log(
+                f"UAV {uav.uav_id} starting cycle "
+                f"{uav.completed_cycles + 1}/{uav.max_cycles}"
+            )
+
+        current_location = uav.current_location(self.env, self.time)
         next_wp = self.env.get_waypoint(next_wp_id)
-
         dt = travel_time(current_location, next_wp.location, self.config.uav.speed)
+
+        uav.start_travel(
+            origin=current_location,
+            destination=next_wp.location,
+            start_time=self.time,
+            end_time=self.time + dt,
+        )
 
         uav.advance_to_next_waypoint()
         self.schedule(self.time + dt, "uav_arrival", uav.uav_id)
 
-    def _handle_return_to_depot(self, uav: UAV) -> None:
-        self._log(f"UAV {uav.uav_id} selected action: return_to_depot")
-
     def _handle_backup(self, uav: UAV) -> None:
         self._log(f"UAV {uav.uav_id} selected action: backup")
+
+        self.metrics.record_backup(
+            revenue=uav.accumulated_revenue,
+            success=True,
+        )
+
+        uav.backed_up_revenue += uav.accumulated_revenue
+        uav.accumulated_revenue = 0.0
+
+        self._continue_to_next_waypoint(uav)
+
+    def _return_to_depot(self, uav: UAV) -> None:
+        current_location = uav.current_location(self.env, self.time)
+        depot_location = self.config.environment.depot_location
+
+        dt = travel_time(current_location, depot_location, self.config.uav.speed)
+
+        uav.start_travel(
+            origin=current_location,
+            destination=depot_location,
+            start_time=self.time,
+            end_time=self.time + dt,
+        )
+
+        uav.returning_to_depot = True
+        self.schedule(self.time + dt, "depot_arrival", uav.uav_id)
+    
+
+    def _handle_depot_arrival(self, event: Event) -> None:
+        if event.uav_id is None:
+            return
+
+        uav = self.get_uav(event.uav_id)
+        if not uav.active:
+            return
+
+        if not self._advance_uav_time(uav):
+            return
+
+        uav.finish_travel()
+
+        delivered_amount = uav.accumulated_revenue + uav.backed_up_revenue
+        uav.delivered_revenue += delivered_amount
+
+        self._log(
+            f"UAV {uav.uav_id} arrived at depot and delivered "
+            f"{delivered_amount:.2f}"
+        )
+
+        uav.accumulated_revenue = 0.0
+        uav.backed_up_revenue = 0.0
+        uav.accumulated_risk = 0.0
+        uav.returning_to_depot = False
+        uav.active = False
+
+        self.metrics.record_completed_mission()
 
     def _log(self, message: str) -> None:
         print(f"[{self.time:.1f}] {message}")
