@@ -53,6 +53,8 @@ def main() -> None:
     )
     sim.run()
 
+    sim.save_results("output/results.xlsx")
+
     print_uav_metrics(sim.uavs.values())
 
     print(f"\n{'Metrics':<35} {'Value':>10}")

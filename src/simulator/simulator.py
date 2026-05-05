@@ -1,4 +1,5 @@
 import heapq
+import pandas as pd
 
 from typing import Dict, List, Optional
 
@@ -30,6 +31,9 @@ class Simulator:
         self.events: List[Event] = []
         self.metrics = Metrics()
 
+        self.event_log: List[Dict] = []
+        self.waypoint_log: List[Dict] = []
+
         self.handlers = {
             "uav_arrival": self._handle_uav_arrival,
             "uav_departure": self._handle_uav_departure,
@@ -60,6 +64,7 @@ class Simulator:
         self.schedule(self.config.waypoint.revenue.update_interval, "update_wp_revenue")
 
     def run(self) -> None:
+        self._log_waypoint_update('initial')
         self.schedule_initial_events()
 
         while self.events and self.time < self.config.simulation.time_limit:
@@ -116,6 +121,8 @@ class Simulator:
         self.metrics.record_risk_accumulated(risk_added)
         self.metrics.record_revenue_collected(revenue_added)
 
+        self._log_state(uav, 'arrival')
+
         self.schedule(
             self.time + self.config.uav.hover_time,
             "uav_departure",
@@ -137,10 +144,12 @@ class Simulator:
 
         self._update_uav_decision_state(uav)
 
-        uav.print_states()
+        # uav.print_states()
 
         action = self.policy.decide_action(uav)
         self.metrics.record_action(action)
+
+        self._log_state(uav, 'departure', action)
 
         if action == "backup":
             self._handle_backup(uav)
@@ -154,6 +163,7 @@ class Simulator:
         self.env.assign_random_risks()
 
         print_environment(self.env)
+        self._log_waypoint_update('risk')
 
         self.schedule(
             self.time + self.config.waypoint.risk.update_interval,
@@ -164,6 +174,7 @@ class Simulator:
         self.env.assign_random_revenues()
 
         print_environment(self.env)
+        self._log_waypoint_update('revenue')
 
         self.schedule(
             self.time + self.config.waypoint.revenue.update_interval,
@@ -178,6 +189,8 @@ class Simulator:
             uav.active = False
             self.metrics.record_crash()
             self._log(f"UAV {uav.uav_id} crashed")
+
+            self._log_state(uav, 'crash')
 
             self._replace_crashed_uav(uav)
             return False
@@ -331,6 +344,8 @@ class Simulator:
             f"{delivered_amount:.2f}"
         )
 
+        self._log_state(uav, 'depot_arrival')
+
         uav.completed_missions += 1
         self.metrics.record_completed_mission()
 
@@ -364,3 +379,48 @@ class Simulator:
 
     def _log(self, message: str) -> None:
         print(f"[{self.time:.1f}] {message}")
+
+    def _log_state(self, uav: UAV, event_type: str, action: Optional[str] = None) -> None:
+        """Log UAV state at this event to the trace."""
+        wp = uav.current_waypoint(self.env)
+
+        self.event_log.append({
+            'time': self.time,
+            'uav_id': uav.uav_id,
+            'event_type': event_type,
+            'waypoint_id': uav.current_waypoint_id,
+            'wp_revenue': wp.revenue if wp else None,
+            'wp_risk': wp.risk if wp else None,
+            'health': uav.health_label(),
+            'link_quality': uav.link_quality,
+            'collected_revenue': uav.collected_revenue_label(),
+            'accumulated_revenue': uav.accumulated_revenue,
+            'backed_up_revenue': uav.backed_up_revenue,
+            'remaining_flight_time': uav.remaining_flight_time,
+            'action': action if action else '',
+        })
+    
+    def _log_waypoint_update(self, update_type: str) -> None:
+        """Log all waypoint states after a revenue or risk update."""
+        for wp in self.env.target_waypoints:
+            self.waypoint_log.append({
+                'time': self.time,
+                'update_type': update_type,  # 'risk' or 'revenue'
+                'waypoint_id': wp.w_id,
+                'location': str(wp.location),
+                'revenue': wp.revenue,
+                'risk': wp.risk,
+            })
+
+    def save_results(self, output_path: str = "simulation_results.xlsx") -> None:
+        """Save event log, waypoint log, and metrics to Excel."""
+        df_events = pd.DataFrame(self.event_log)
+        df_waypoints = pd.DataFrame(self.waypoint_log)
+        df_metrics = pd.DataFrame([vars(self.metrics)])
+        
+        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+            df_events.to_excel(writer, sheet_name='UAV Events', index=False)
+            df_waypoints.to_excel(writer, sheet_name='Waypoint Updates', index=False)
+            df_metrics.to_excel(writer, sheet_name='Summary Metrics', index=False)
+        
+        print(f"\nResults saved to {output_path}")
