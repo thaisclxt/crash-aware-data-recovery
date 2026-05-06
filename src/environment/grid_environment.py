@@ -28,6 +28,7 @@ class GridEnvironment:
         self.assign_random_revenues()
         self.assign_random_risks()
 
+
     def build_grid(self) -> List[Waypoint]:
         waypoints: List[Waypoint] = []
 
@@ -51,11 +52,14 @@ class GridEnvironment:
 
         return waypoints
 
+
     def get_waypoint(self, w_id: int) -> Waypoint:
         return self.waypoints_by_id[w_id]
 
+
     def select_random_targets(self) -> List[Waypoint]:
         return random.sample(self.waypoints, self.total_targets)
+
 
     def assign_random_revenues(self) -> None:
         min_revenue = self.config.waypoint.revenue.min
@@ -63,6 +67,7 @@ class GridEnvironment:
 
         for wp in self.target_waypoints:
             wp.revenue = random.uniform(min_revenue, max_revenue)
+
 
     def assign_random_risks(self) -> None:
         for wp in self.target_waypoints:

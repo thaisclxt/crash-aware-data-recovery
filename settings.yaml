@@ -15,22 +15,22 @@ grid:
   spacing: 5
 
 uav:
-  speed: 10
-  max_flight_time: 20 # in seconds
-  hover_time: 5 # in seconds
-  communication_range: 60
+  speed: 5
+  max_flight_time: 41
+  hover_time: 10
+  communication_range: 10
 
 waypoint:
   revenue:
     base: 30
     min: 60
     max: 600
-    update_interval: 20 # in seconds
+    update_interval: 20
   risk:
     base: 0
     min: 0
     max: 6
-    update_interval: 30 # in seconds
+    update_interval: 20
 
 mdp:
   state:

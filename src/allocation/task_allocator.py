@@ -11,6 +11,7 @@ class TaskAllocator:
         self.env = env
         self.uavs: List[UAV] = []
 
+
     def initialize_uavs(self) -> List[UAV]:
         self.uavs = [
             UAV(
@@ -21,6 +22,7 @@ class TaskAllocator:
             for uav_id in range(self.env.total_uavs)
         ]
         return self.uavs
+
 
     def assign_random_sequences(self) -> None:
         if not self.uavs:
