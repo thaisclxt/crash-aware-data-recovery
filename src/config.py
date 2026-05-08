@@ -35,6 +35,7 @@ class UAVConfig:
     max_flight_time: float
     hover_time: float
     communication_range: float
+    base_crash_probability: float
 
 
 @dataclass
@@ -192,6 +193,7 @@ def load_configuration(path: Path) -> Config:
             max_flight_time=uav.get("max_flight_time"),
             hover_time=uav.get("hover_time"),
             communication_range=uav.get("communication_range"),
+            base_crash_probability=uav.get("base_crash_probability"),
         ),
         waypoint=WaypointConfig(
             revenue=RevenueConfig(

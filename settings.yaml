@@ -1,12 +1,12 @@
 simulation:
   seed: 32
   number_runs: 100
-  time_limit: 80
+  time_limit: 500
   generate_random_targets: true
 
 environment:
-  total_uavs: 3
-  total_targets: 5
+  total_uavs: 2
+  total_targets: 3
   depot_location: [0, 0]
 
 grid:
@@ -15,10 +15,11 @@ grid:
   spacing: 5
 
 uav:
-  speed: 5
-  max_flight_time: 41
-  hover_time: 10
+  speed: 10
+  max_flight_time: 100
+  hover_time: 5
   communication_range: 10
+  base_crash_probability: 0.2
 
 waypoint:
   revenue:

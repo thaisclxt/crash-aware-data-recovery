@@ -1,4 +1,4 @@
-import heapq
+import heapq, random
 import pandas as pd
 
 from typing import Dict, List, Optional
@@ -119,6 +119,8 @@ class Simulator:
             end_time=self.time + dt,
         )
 
+        self._log_state(uav, 'depot_departure', wp_id='depot')
+
         uav.advance_to_next_waypoint()
         self.schedule(self.time + dt, "uav_arrival", uav.uav_id)
 
@@ -133,10 +135,17 @@ class Simulator:
 
         self._log(f"UAV {uav.uav_id} arrived at WP {uav.current_waypoint_id}")
 
-        if not self._advance_uav_time(uav):
-            return
+        self._update_uav_time(uav)
         
         uav.finish_travel()
+
+        crash_draw, crashed = self._check_geometric_crash(uav)
+        crash_prob = self.config.uav.base_crash_probability
+
+        # Check for geometric crash
+        if crashed:
+            self._crash_uav(uav, crash_draw=crash_draw, crash_prob=crash_prob)
+            return
 
         risk_added = uav.update_accumulated_risk(self.env)
         revenue_added = uav.update_accumulated_revenue(self.env)
@@ -144,7 +153,7 @@ class Simulator:
         self.metrics.record_risk_accumulated(risk_added)
         self.metrics.record_revenue_collected(revenue_added)
 
-        self._log_state(uav, 'arrival')
+        self._log_state(uav, 'arrival', crash_draw=crash_draw, crash_prob=crash_prob)
 
         self.schedule(
             self.time + self.config.uav.hover_time,
@@ -163,8 +172,7 @@ class Simulator:
 
         self._log(f"UAV {uav.uav_id} departed from WP {uav.current_waypoint_id}")
 
-        if not self._advance_uav_time(uav):
-            return
+        self._update_uav_time(uav)
 
         self._update_uav_decision_state(uav)
 
@@ -203,27 +211,41 @@ class Simulator:
         )
 
 
-    def _advance_uav_time(self, uav: UAV) -> bool:
+    def _update_uav_time(self, uav: UAV) -> None:
+        """Update UAV remaining flight time (no crash check)."""
         elapsed = self.time - uav.last_event_time
         uav.remaining_flight_time -= elapsed
-
-        if uav.remaining_flight_time <= 0:
-            uav.active = False
-            uav.final_status = "crashed"
-
-            assignment_by_id = {row['uav_id']: row for row in self.assignment_log}
-            assignment_by_id[uav.uav_id]['crash_count'] += 1
-            self.metrics.record_crash()
-            self._log(f"UAV {uav.uav_id} crashed")
-
-            self._log_state(uav, 'crash')
-
-            self._replace_crashed_uav(uav)
-            return False
-
         uav.last_event_time = self.time
-        return True
-    
+
+
+    def _crash_uav(
+        self,
+        uav: UAV,
+        crash_draw: float,
+        crash_prob: float,
+    ) -> None:
+        """Handle geometric crash."""
+        uav.active = False
+        uav.final_status = f"crashed"
+
+        assignment_by_id = {row['uav_id']: row for row in self.assignment_log}
+        row = assignment_by_id[uav.uav_id]
+        row['crash_count'] += 1
+
+        self.metrics.record_crash()
+        self._log(f"UAV {uav.uav_id} crashed")
+        self._log_state(uav, 'crash', crash_draw=crash_draw, crash_prob=crash_prob)
+
+        self._replace_crashed_uav(uav)
+
+
+    def _check_geometric_crash(self, uav: UAV) -> tuple[float, bool]:
+        """Check if UAV crashes using geometric distribution."""
+        crash_draw = random.random()
+        crash_prob = self.config.uav.base_crash_probability
+        crashed = crash_draw < crash_prob
+        return crash_draw, crashed
+
 
     def _replace_crashed_uav(self, crashed_uav: UAV) -> None:
         if self.time >= self.config.simulation.time_limit:
@@ -271,6 +293,32 @@ class Simulator:
             medium_threshold=self.config.mdp.state.collected_revenue.threshold.medium,
         )
 
+    
+    def _can_complete_full_cycle(self, uav: UAV) -> bool:
+        """
+        Check if UAV has enough battery to complete the entire remaining sequence
+        from current position and return to depot.
+        
+        Called only at the START of a new cycle (when sequence_index == -1).
+        """
+        current_location = uav.current_location(self.env, self.time)
+        depot_location = self.config.environment.depot_location
+        
+        # Calculate time for entire sequence from current position
+        total_time = 0.0
+        current_loc = current_location
+        
+        # Iterate through entire sequence
+        for wp_id in uav.sequence:
+            wp = self.env.get_waypoint(wp_id)
+            total_time += travel_time(current_loc, wp.location, self.config.uav.speed)
+            total_time += self.config.uav.hover_time
+            current_loc = wp.location
+        
+        # Add return to depot from last waypoint
+        total_time += travel_time(current_loc, depot_location, self.config.uav.speed)
+        
+        return uav.remaining_flight_time >= total_time
 
     def _continue_to_next_waypoint(self, uav: UAV) -> None:
         next_wp_id = uav.peek_next_waypoint_id()
@@ -290,13 +338,23 @@ class Simulator:
                 )
                 self._return_to_depot(uav)
                 return
-
+            
+            # Reset for new cycle
             uav.sequence_index = -1
             uav.current_waypoint_id = None
             next_wp_id = uav.peek_next_waypoint_id()
 
             if next_wp_id is None:
                 self._log(f"UAV {uav.uav_id} has empty sequence, returning to depot")
+                self._return_to_depot(uav)
+                return
+            
+            # Check if can complete ENTIRE next cycle
+            if not self._can_complete_full_cycle(uav):
+                self._log(
+                    f"UAV {uav.uav_id} does not have enough battery for full cycle "
+                    f"{uav.completed_cycles + 1}, returning to depot"
+                )
                 self._return_to_depot(uav)
                 return
 
@@ -325,6 +383,9 @@ class Simulator:
 
         backup_amount = uav.accumulated_revenue
 
+        assignment_by_id = {row['uav_id']: row for row in self.assignment_log}
+        assignment_by_id[uav.uav_id]['backup_count'] += 1
+
         self.metrics.record_backup(
             revenue=backup_amount,
             success=True,
@@ -351,7 +412,7 @@ class Simulator:
         )
 
         self.schedule(self.time + dt, "depot_arrival", uav.uav_id)
-    
+
 
     def _handle_depot_arrival(self, event: Event) -> None:
         if event.uav_id is None:
@@ -361,8 +422,8 @@ class Simulator:
         if not uav.active:
             return
 
-        if not self._advance_uav_time(uav):
-            return
+        # Update remaining flight time
+        self._update_uav_time(uav)
 
         uav.finish_travel()
 
@@ -374,7 +435,7 @@ class Simulator:
             f"{delivered_amount:.2f}"
         )
 
-        self._log_state(uav, 'depot_arrival')
+        self._log_state(uav, 'depot_arrival', wp_id='depot')
 
         uav.completed_missions += 1
         self.metrics.record_completed_mission()
@@ -414,7 +475,16 @@ class Simulator:
         print(f"[{self.time:.1f}] {message}")
 
 
-    def _log_state(self, uav: UAV, event_type: str, action: Optional[str] = None) -> None:
+    def _log_state(
+        self,
+        uav: UAV,
+        event_type: str,
+        action: Optional[str] = None,
+        wp_id: Optional[str] = None,
+        crash_draw: Optional[float] = None,
+        crash_prob: Optional[float] = None,
+
+    ) -> None:
         """Log UAV state at this event to the trace."""
         wp = uav.current_waypoint(self.env)
 
@@ -422,25 +492,28 @@ class Simulator:
             'time': self.time,
             'uav_id': uav.uav_id,
             'event_type': event_type,
-            'wp_id': uav.current_waypoint_id,
+            'wp_id': wp_id if wp_id is not None else uav.current_waypoint_id,
             'wp_revenue': wp.revenue if wp else None,
             'wp_risk': wp.risk if wp else None,
             'health': uav.health_label(),
             'link_quality': uav.link_quality,
             'collected_revenue': uav.collected_revenue_label(),
+            'accumulated_risk': uav.accumulated_risk,
             'accumulated_revenue': uav.accumulated_revenue,
             'backed_up_revenue': uav.backed_up_revenue,
             'remaining_flight_time': uav.remaining_flight_time,
             'action': action if action else '',
+            'crash_draw': crash_draw if crash_draw is not None else '',
+            'crash_prob': crash_prob if crash_prob is not None else '',
         })
-    
+
 
     def _log_waypoint_update(self, update_type: str) -> None:
         """Log all waypoint states after a revenue or risk update."""
         for wp in self.env.target_waypoints:
             self.waypoint_log.append({
                 'time': self.time,
-                'update_type': update_type,  # `initial`, 'risk' or 'revenue'
+                'update_type': update_type,
                 'id': wp.w_id,
                 'location': str(wp.location),
                 'revenue': wp.revenue,
@@ -451,7 +524,6 @@ class Simulator:
     def _log_uav_metrics(self) -> None:
         """Log UAV task assignments with computed parameters."""
         for uav in self.uavs.values():
-            # Calculate total sequence distance
             depot = self.config.environment.depot_location
             total_distance = 0.0
             current_loc = depot
@@ -461,13 +533,11 @@ class Simulator:
                 total_distance += euclidean_distance(current_loc, wp.location)
                 current_loc = wp.location
             
-            # Add return to depot distance
             total_distance += euclidean_distance(current_loc, depot)
             
-            # Estimate time for one complete cycle
-            travel_time = total_distance / self.config.uav.speed
-            hover_time = len(uav.sequence) * self.config.uav.hover_time
-            cycle_time = travel_time + hover_time
+            travel_duration = total_distance / self.config.uav.speed
+            hover_duration = len(uav.sequence) * self.config.uav.hover_time
+            cycle_time = travel_duration + hover_duration
             
             self.assignment_log.append({
                 'uav_id': uav.uav_id,
@@ -475,9 +545,14 @@ class Simulator:
                 'sequence_length': len(uav.sequence),
                 'm_j': uav.max_cycles,
                 'total_distance': total_distance,
+                'travel_time_estimate': travel_duration,
+                'hover_time_estimate': hover_duration,
                 'estimated_cycle_time': cycle_time,
                 'max_flight_time': self.config.uav.max_flight_time,
+                'route_feasible': cycle_time <= self.config.uav.max_flight_time,
+                'utilization_ratio': cycle_time / self.config.uav.max_flight_time,
                 'crash_count': 0,
+                'backup_count': 0,
             })
 
 
@@ -498,9 +573,13 @@ class Simulator:
                 final_status = uav.final_status
             
             row.update({
+                'completed_cycles': uav.completed_cycles,
                 'completed_missions': uav.completed_missions,
                 'delivered_revenue': uav.delivered_revenue,
+                'avg_revenue_per_mission': uav.delivered_revenue / max(1, uav.completed_missions),
+                'mission_completion_rate': uav.completed_cycles / max(1, row['m_j']),
                 'total_backed_up_revenue': uav.total_backed_up_revenue,
+                'backup_rate': row['backup_count'] / max(1, uav.completed_missions),
                 'final_status': final_status,
             })
 
