@@ -1,55 +1,63 @@
 simulation:
-  seed: 32
-  number_runs: 100
-  time_limit: 500
-  generate_random_targets: true
+  seed: 32 # for reproducibility
+  time_limit: 100
+  generate_random_targets: false
 
 environment:
   total_uavs: 2
-  total_targets: 3
+  total_targets: 19
   depot_location: [0, 0]
+  fixed_targets: [ # use this if generate_random_targets is false
+    [5, 0],
+    [5, 5],
+    [10, 0],
+    # [10, 5],
+    # [10, 10]
+  ]
 
+# same parameters used in Philip's thesis
 grid:
-  width: 13
-  height: 13
+  width: 3
+  height: 3
   spacing: 5
 
 uav:
   speed: 10
-  max_flight_time: 100
+  max_flight_time: 50
   hover_time: 5
-  communication_range: 10
-  base_crash_probability: 0.2
+  communication_range: 95 # based on the results from Justin's paper
+  base_crash_probability: 0.0 # higher values means more likely to crash
 
+# update_interval means how often the revenue and risk are updated
 waypoint:
   revenue:
     base: 30
     min: 60
     max: 600
-    update_interval: 20
+    update_interval: 90
   risk:
     base: 0
     min: 0
     max: 6
-    update_interval: 20
+    update_interval: 50
 
 mdp:
-  state:
-    health:
-      default: 1.0
-      alpha: 0.6
-      beta: 0.4
+  state: # each state has a weight that determines its importance in the overall policy score
+    health: # alpha and beta are weights that determine the relative importance of flight time and risk in calculating health score
+      default: 1.0 # all UAVs start with full health
+      alpha: 0.6 # higher values means flight time is more important for the health score
+      beta: 0.4 # higher values means risk is more important for the health score
       weight: 0.5
       threshold:
         good: 0.7
         warning: 0.4
 
     link_quality:
-      default: 1.0
+      default: 1.0 # all UAVs start with perfect link quality
       weight: 0.3
     
     collected_revenue:
-      default: 0.0
+      default: 0.0 # all UAVs start with no revenue collected
       weight: 0.2
       threshold:
         low: 0.4

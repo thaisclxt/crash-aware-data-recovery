@@ -8,7 +8,6 @@ from pathlib import Path
 class SimulationConfig:
     time_limit: int
     seed: int
-    number_runs: int
     generate_random_targets: bool
 
     def __post_init__(self) -> None:
@@ -20,6 +19,7 @@ class EnvironmentConfig:
     total_uavs: int
     total_targets: int
     depot_location: tuple[float, float]
+    fixed_targets: list[tuple[float, float]]
 
 
 @dataclass
@@ -169,19 +169,17 @@ def load_configuration(path: Path) -> Config:
 
     backup_action = mdp_action.get("backup", {})
 
-    depot_location = tuple(environment.get("depot_location", (0.0, 0.0)))
-
     return Config(
         simulation=SimulationConfig(
             time_limit=simulation.get("time_limit"),
             seed=simulation.get("seed"),
-            number_runs=simulation.get("number_runs"),
             generate_random_targets=simulation.get("generate_random_targets"),
         ),
         environment=EnvironmentConfig(
             total_uavs=environment.get("total_uavs"),
             total_targets=environment.get("total_targets"),
-            depot_location=depot_location,
+            depot_location=tuple(environment.get("depot_location", (0.0, 0.0))),
+            fixed_targets=environment.get("fixed_targets", []),
         ),
         grid=GridConfig(
             width=grid.get("width"),

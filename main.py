@@ -11,10 +11,13 @@ from src.policy.backup_policy import BackupPolicy
 
 
 def main() -> None:
+    # All configuration parameters are loaded from the settings.yaml file
     config = load_configuration(Path("settings.yaml"))
 
+    # Set the random seed for reproducibility
     random.seed(config.simulation.seed)
 
+    # Initialize the environment, task allocator, and policy
     env = GridEnvironment(config=config)
 
     allocator = TaskAllocator(env=env)
@@ -23,6 +26,7 @@ def main() -> None:
 
     policy = BackupPolicy(config=config)
 
+    # Run the simulation for an specified number of time and save the results to an Excel file
     sim = Simulator(
         config=config,
         env=env,

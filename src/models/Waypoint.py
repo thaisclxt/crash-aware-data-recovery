@@ -13,6 +13,7 @@ class Waypoint:
     def x(self) -> float:
         return self.location[0]
 
+
     @property
     def y(self) -> float:
         return self.location[1]

@@ -15,7 +15,6 @@ class GridEnvironment:
         self.spacing = config.grid.spacing
 
         self.total_uavs = config.environment.total_uavs
-        self.total_targets = config.environment.total_targets
         self.depot_location = config.environment.depot_location
 
         self.waypoints: List[Waypoint] = self.build_grid()
@@ -23,7 +22,15 @@ class GridEnvironment:
             wp.w_id: wp for wp in self.waypoints
         }
 
-        self.target_waypoints: List[Waypoint] = self.select_random_targets()
+        if config.simulation.generate_random_targets:
+            self.total_targets = config.environment.total_targets
+            self.target_waypoints: List[Waypoint] = self.select_random_targets()
+        else:
+            fixed_target_locations = set(tuple(loc) for loc in config.environment.fixed_targets)
+            self.target_waypoints: List[Waypoint] = [
+                wp for wp in self.waypoints if wp.location in fixed_target_locations
+            ]
+            self.total_targets = len(self.target_waypoints)
 
         self.assign_random_revenues()
         self.assign_random_risks()
@@ -58,7 +65,8 @@ class GridEnvironment:
 
 
     def select_random_targets(self) -> List[Waypoint]:
-        return random.sample(self.waypoints, self.total_targets)
+        targets = random.sample(self.waypoints, self.total_targets)
+        return sorted(targets, key=lambda wp: wp.w_id)
 
 
     def assign_random_revenues(self) -> None:

@@ -3,7 +3,8 @@ from typing import List, Optional, Tuple
 from ..config import Config
 from ..environment.grid_environment import GridEnvironment
 from ..models.waypoint import Waypoint
-from ..utils import euclidean_distance, calculate_max_cycles
+from ..utils import euclidean_distance
+from ..allocation.tour_planner import build_tour_stats, can_depart_for_full_tour, is_depot
 
 
 class UAV:
@@ -12,7 +13,6 @@ class UAV:
         self.sequence = sequence
         self.config = config
 
-        # State variables
         self.remaining_flight_time: float = config.uav.max_flight_time
         self.health: float = config.mdp.state.health.default
         self.link_quality: float = config.mdp.state.link_quality.default
@@ -20,18 +20,25 @@ class UAV:
 
         self.last_event_time: float = 0.0
         self.accumulated_risk: int = 0
-        self.accumulated_revenue: float = 0.0 # currently carried this mission
-        self.delivered_revenue: float = 0.0 # lifetime delivered across missions
-        self.backed_up_revenue: float = 0.0 # current mission only
-        self.total_backed_up_revenue: float = 0.0 # lifetime across missions
+        self.accumulated_revenue: float = 0.0
+        self.delivered_revenue: float = 0.0
+        self.backed_up_revenue: float = 0.0
+        self.total_backed_up_revenue: float = 0.0
+
+        self.lost_revenue = 0.0
+        self.revenue_fraction = 0.0
 
         self.active: bool = True
         self.final_status = "active"
 
-        self.completed_cycles: int = 0
-        self.max_cycles: int = 1
+        self.completed_missions: int = 0
 
-        self.sequence_index: int = -1
+        self.m_j: int = 0
+        self.tour: List[int] = []
+        self.tour_time: float = 0.0
+        self.hover_time_total: float = 0.0
+
+        self.tour_index: int = 0
         self.current_waypoint_id: Optional[int] = None
 
         self.travel_origin: Optional[Tuple[float, float]] = None
@@ -39,11 +46,29 @@ class UAV:
         self.travel_start_time: Optional[float] = None
         self.travel_end_time: Optional[float] = None
 
-        self.completed_missions: int = 0
 
+    def update_tour_stats(self, env: GridEnvironment) -> None:
+        stats = build_tour_stats(self.sequence, env, self.config)
 
-    def update_max_cycles(self, env: GridEnvironment) -> None:
-        self.max_cycles = calculate_max_cycles(self, env, self.config)
+        self.m_j = stats.m_j
+        self.tour = stats.tour
+        self.tour_time = stats.tour_time
+        self.hover_time_total = stats.hover_time_total
+
+        self.tour_index = 0
+        self.current_waypoint_id = None
+
+        if can_depart_for_full_tour(
+            sequence=self.sequence,
+            env=env,
+            config=self.config,
+            remaining_flight_time=self.remaining_flight_time,
+        ):
+            self.active = True
+            self.final_status = "ready"
+        else:
+            self.active = False
+            self.final_status = "insufficient_flight_time"
 
 
     def current_waypoint(self, env: GridEnvironment) -> Optional[Waypoint]:
@@ -108,25 +133,25 @@ class UAV:
         return wp.location
 
 
-    def peek_next_waypoint_id(self) -> Optional[int]:
-        next_index = self.sequence_index + 1
-        if next_index >= len(self.sequence):
+    def peek_next_node_id(self) -> Optional[int]:
+        next_index = self.tour_index + 1
+        if next_index >= len(self.tour):
             return None
-        return self.sequence[next_index]
+        return self.tour[next_index]
 
 
-    def advance_to_next_waypoint(self) -> Optional[int]:
-        next_waypoint_id = self.peek_next_waypoint_id()
-        if next_waypoint_id is None:
+    def advance_in_tour(self) -> Optional[int]:
+        next_node_id = self.peek_next_node_id()
+        if next_node_id is None:
             return None
 
-        self.sequence_index += 1
-        self.current_waypoint_id = next_waypoint_id
-        return next_waypoint_id
+        self.tour_index += 1
+        self.current_waypoint_id = None if is_depot(next_node_id) else next_node_id
+        return next_node_id
 
 
-    def has_finished_sequence(self) -> bool:
-        return self.peek_next_waypoint_id() is None
+    def has_finished_tour(self) -> bool:
+        return self.tour_index >= len(self.tour) - 1
 
 
     def update_accumulated_risk(self, env: GridEnvironment) -> int:
@@ -141,9 +166,6 @@ class UAV:
     def update_accumulated_revenue(self, env: GridEnvironment) -> float:
         wp = self.current_waypoint(env)
         if wp is None:
-            return 0.0
-
-        if wp.location == self.config.environment.depot_location:
             return 0.0
 
         self.accumulated_revenue += wp.revenue
@@ -166,6 +188,7 @@ class UAV:
         if max_wp_risk > 0.0:
             risk_fraction = min(1.0, self.accumulated_risk / max_wp_risk)
 
+        # alpha and beta are weights that determine the relative importance of flight time and risk in calculating health score
         score = alpha * (1.0 - flight_fraction) + beta * (1.0 - risk_fraction)
 
         if score > good_threshold:
@@ -184,7 +207,6 @@ class UAV:
         now: float,
     ) -> None:
         indicators: List[int] = []
-
         my_location = self.current_location(env, now)
 
         for other in all_uavs:
@@ -206,13 +228,15 @@ class UAV:
         medium_threshold: float,
     ) -> None:
         max_possible_revenue = total_targets * max_wp_revenue
+        print(f"Max possible revenue: {max_possible_revenue}")
         if max_possible_revenue <= 0.0:
             self.collected_revenue = 0.0
             return
 
-        # Count both carried and backed-up revenue for this mission
         mission_revenue = self.accumulated_revenue + self.backed_up_revenue
         revenue_fraction = min(1.0, mission_revenue / max_possible_revenue)
+
+        self.revenue_fraction = revenue_fraction  # Store for potential use
 
         if revenue_fraction < low_threshold:
             self.collected_revenue = 0.0
@@ -220,8 +244,8 @@ class UAV:
             self.collected_revenue = 0.5
         else:
             self.collected_revenue = 1.0
-    
-    
+
+
     def health_label(self) -> str:
         good_threshold = self.config.mdp.state.health.threshold.good
         warning_threshold = self.config.mdp.state.health.threshold.warning
@@ -237,8 +261,8 @@ class UAV:
         medium_threshold = self.config.mdp.state.collected_revenue.threshold.medium
         low_threshold = self.config.mdp.state.collected_revenue.threshold.low
 
-        if self.collected_revenue >= medium_threshold:
+        if self.collected_revenue > medium_threshold:
             return "high"
-        if self.collected_revenue >= low_threshold:
+        if self.collected_revenue > low_threshold:
             return "medium"
         return "low"

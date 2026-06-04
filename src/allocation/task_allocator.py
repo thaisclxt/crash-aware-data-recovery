@@ -39,6 +39,11 @@ class TaskAllocator:
                 uav.sequence.append(target_id)
                 unassigned_targets.remove(target_id)
 
+        # Calculate m_j, tour_cycle_time and return_to_depot_time for each UAV after assignment
+        for uav in self.uavs:
+            uav.update_tour_stats(self.env)
+
+
     def get_uav_sequences(self) -> List[str]:
         return [
             f"UAV {uav.uav_id} sequence: {uav.sequence}"
