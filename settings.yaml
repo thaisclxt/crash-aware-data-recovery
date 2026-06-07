@@ -1,18 +1,16 @@
 simulation:
-  seed: 32 # for reproducibility
+  seed:
   time_limit: 100
   generate_random_targets: false
 
 environment:
-  total_uavs: 2
+  total_uavs: 1
   total_targets: 19
   depot_location: [0, 0]
   fixed_targets: [ # use this if generate_random_targets is false
     [5, 0],
     [5, 5],
-    [10, 0],
-    # [10, 5],
-    # [10, 10]
+    [5, 10],
   ]
 
 # same parameters used in Philip's thesis
@@ -24,7 +22,8 @@ grid:
 uav:
   speed: 10
   max_flight_time: 50
-  hover_time: 5
+  hover_time: 5 # time taken to collect revenue at each target waypoint
+  preparation_time: 1 # time taken to prepare the UAV for the next tour after returning to depot
   communication_range: 95 # based on the results from Justin's paper
   base_crash_probability: 0.0 # higher values means more likely to crash
 
@@ -62,6 +61,9 @@ mdp:
       threshold:
         low: 0.4
         medium: 0.7
+
+    backed_up_revenue:
+      default: 0.0 # all UAVs start with no revenue backed_up
   
   action:
     return:

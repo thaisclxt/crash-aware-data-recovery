@@ -3,8 +3,8 @@ from typing import List, Optional, Tuple
 from ..config import Config
 from ..environment.grid_environment import GridEnvironment
 from ..models.waypoint import Waypoint
-from ..utils import euclidean_distance
-from ..allocation.tour_planner import build_tour_stats, can_depart_for_full_tour, is_depot
+from ..utils import euclidean_distance, travel_time
+from ..simulator.metrics import Metrics
 
 
 class UAV:
@@ -13,32 +13,31 @@ class UAV:
         self.sequence = sequence
         self.config = config
 
-        self.remaining_flight_time: float = config.uav.max_flight_time
+        self.speed = config.uav.speed
+        self.max_flight_time = config.uav.max_flight_time
+        self.hover_time = config.uav.hover_time
+        self.preparation_time = config.uav.preparation_time
+        
+        self.m_j: int = 0
+        self.tour: List[int | str] = []
+        self.estimated_tour_time: float = 0.0
+        self.remaining_flight_time: float = self.max_flight_time
+
         self.health: float = config.mdp.state.health.default
         self.link_quality: float = config.mdp.state.link_quality.default
         self.collected_revenue: float = config.mdp.state.collected_revenue.default
+        self.backed_up_revenue: float = config.mdp.state.backed_up_revenue.default
 
         self.last_event_time: float = 0.0
+
         self.accumulated_risk: int = 0
         self.accumulated_revenue: float = 0.0
         self.delivered_revenue: float = 0.0
-        self.backed_up_revenue: float = 0.0
+        
         self.total_backed_up_revenue: float = 0.0
-
         self.lost_revenue = 0.0
-        self.revenue_fraction = 0.0
 
-        self.active: bool = True
-        self.final_status = "active"
-
-        self.completed_missions: int = 0
-
-        self.m_j: int = 0
-        self.tour: List[int] = []
-        self.tour_time: float = 0.0
-        self.hover_time_total: float = 0.0
-
-        self.tour_index: int = 0
+        self.tour_index: int = 0 # where we are in the tour
         self.current_waypoint_id: Optional[int] = None
 
         self.travel_origin: Optional[Tuple[float, float]] = None
@@ -46,30 +45,72 @@ class UAV:
         self.travel_start_time: Optional[float] = None
         self.travel_end_time: Optional[float] = None
 
+        self.metrics = Metrics()
 
-    def update_tour_stats(self, env: GridEnvironment) -> None:
-        stats = build_tour_stats(self.sequence, env, self.config)
 
-        self.m_j = stats.m_j
-        self.tour = stats.tour
-        self.tour_time = stats.tour_time
-        self.hover_time_total = stats.hover_time_total
+    def prepare_mission(self, env: GridEnvironment) -> None:
+        """Compute m_j, estimated_tour_time and set tour indexes"""
+        if not self.sequence:
+            return
+        
+        m_j = 0
 
-        self.tour_index = 0
-        self.current_waypoint_id = None
+        depot = self.config.environment.depot_location
+        first_target = env.get_waypoint(self.sequence[0]).location
+        last_target = env.get_waypoint(self.sequence[-1]).location
+        
+        # depot -> first target
+        x = travel_time(
+            origin=depot,
+            destination=first_target,
+            speed=self.speed
+        ) + self.preparation_time
 
-        if can_depart_for_full_tour(
-            sequence=self.sequence,
-            env=env,
-            config=self.config,
-            remaining_flight_time=self.remaining_flight_time,
-        ):
-            self.active = True
-            self.final_status = "ready"
-        else:
-            self.active = False
-            self.final_status = "insufficient_flight_time"
+        # last target -> depot
+        y = travel_time(
+            origin=last_target,
+            destination=depot,
+            speed=self.speed
+        )
 
+        # jump from the end of the sequence back to its beginning
+        # in case len(sequence) == 1, k = 0 since there's no travel between targets
+        k = travel_time(
+            origin=last_target,
+            destination=first_target,
+            speed=self.speed
+        )
+
+        z = self.hover_time
+        for wp_id, nxt_wp_id in zip(self.sequence, self.sequence[1:]):
+            z += travel_time(
+                origin=env.get_waypoint(wp_id).location,
+                destination=env.get_waypoint(nxt_wp_id).location,
+                speed=self.speed
+            ) + self.hover_time
+
+        while True:
+            if (x + y + ((m_j+1) * z) + (m_j * k)) > self.max_flight_time:
+                break
+
+            time = x + y + ((m_j+1) * z) + (m_j * k)
+            m_j += 1
+
+        self.m_j = m_j
+        self.estimated_tour_time = time
+
+        self._set_tour()
+
+    
+    def _set_tour(self) -> None:
+        tour = ["depot"]
+        for _ in range(self.m_j):
+            for wp_id in self.sequence:
+                tour.append(wp_id)
+        tour.append("depot")
+
+        self.tour = tour
+    
 
     def current_waypoint(self, env: GridEnvironment) -> Optional[Waypoint]:
         if self.current_waypoint_id is None:
@@ -133,21 +174,20 @@ class UAV:
         return wp.location
 
 
-    def peek_next_node_id(self) -> Optional[int]:
+    def peek_next_wp_id(self) -> Optional[int | str]:
         next_index = self.tour_index + 1
         if next_index >= len(self.tour):
             return None
         return self.tour[next_index]
 
 
-    def advance_in_tour(self) -> Optional[int]:
-        next_node_id = self.peek_next_node_id()
-        if next_node_id is None:
+    def advance_in_tour(self) -> None:
+        next_wp_id = self.peek_next_wp_id()
+        if next_wp_id is None or next_wp_id == "depot":
             return None
 
         self.tour_index += 1
-        self.current_waypoint_id = None if is_depot(next_node_id) else next_node_id
-        return next_node_id
+        self.current_waypoint_id = next_wp_id
 
 
     def has_finished_tour(self) -> bool:
@@ -210,7 +250,7 @@ class UAV:
         my_location = self.current_location(env, now)
 
         for other in all_uavs:
-            if other.uav_id == self.uav_id or not other.active:
+            if other.uav_id == self.uav_id:
                 continue
 
             other_location = other.current_location(env, now)
@@ -228,7 +268,6 @@ class UAV:
         medium_threshold: float,
     ) -> None:
         max_possible_revenue = total_targets * max_wp_revenue
-        print(f"Max possible revenue: {max_possible_revenue}")
         if max_possible_revenue <= 0.0:
             self.collected_revenue = 0.0
             return

@@ -7,13 +7,18 @@ from ..models.uav import UAV
 
 
 class TaskAllocator:
+    """
+    A simple task allocator that assigns target waypoints to UAVs randomly.
+    """
     def __init__(self, env: GridEnvironment) -> None:
         self.env = env
-        self.uavs: List[UAV] = []
+        self.uavs = self._build_uavs()
+
+        self._assign_tasks()
 
 
-    def initialize_uavs(self) -> List[UAV]:
-        self.uavs = [
+    def _build_uavs(self) -> List[UAV]:
+        return [
             UAV(
                 uav_id=uav_id,
                 sequence=[],
@@ -21,31 +26,18 @@ class TaskAllocator:
             )
             for uav_id in range(self.env.total_uavs)
         ]
-        return self.uavs
 
 
-    def assign_random_sequences(self) -> None:
-        if not self.uavs:
-            raise ValueError("UAVs must be initialized before assigning sequences.")
+    def _assign_tasks(self) -> None:
+        """
+        Randomly assign target waypoints to UAVs and compute tour stats.
+        """
+        target_ids = [wp.w_id for wp in self.env.target_waypoints]
+        random.shuffle(target_ids)
 
-        unassigned_targets = [wp.w_id for wp in self.env.target_waypoints]
+        for index, target_id in enumerate(target_ids):
+            uav = self.uavs[index % len(self.uavs)]
+            uav.sequence.append(target_id)
 
-        while unassigned_targets:
-            for uav in self.uavs:
-                if not unassigned_targets:
-                    break
-
-                target_id = random.choice(unassigned_targets)
-                uav.sequence.append(target_id)
-                unassigned_targets.remove(target_id)
-
-        # Calculate m_j, tour_cycle_time and return_to_depot_time for each UAV after assignment
         for uav in self.uavs:
-            uav.update_tour_stats(self.env)
-
-
-    def get_uav_sequences(self) -> List[str]:
-        return [
-            f"UAV {uav.uav_id} sequence: {uav.sequence}"
-            for uav in self.uavs
-        ]
+            uav.prepare_mission(self.env)

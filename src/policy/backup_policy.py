@@ -4,26 +4,29 @@ from ..models.uav import UAV
 
 class BackupPolicy:
     def __init__(self, config: Config) -> None:
-        self.config = config
+        self.backup_treshold = config.mdp.action.backup.threshold
+        
+        self.health_weight = config.mdp.state.health.weight
+        self.link_weight = config.mdp.state.link_quality.weight
+        self.rev_weight = config.mdp.state.collected_revenue.weight
     
 
-    def compute_state_score(self, uav: UAV) -> float:
-        """Compute a weighted state quality score (higher = better)."""
+    def _compute_score(self, uav: UAV) -> float:
+        """
+        Compute a weighted state score where a higher score means better peformance.
+        """
         return (
-            self.config.mdp.state.health.weight * uav.health
-            + self.config.mdp.state.link_quality.weight * uav.link_quality
-            + self.config.mdp.state.collected_revenue.weight * uav.collected_revenue
+            self.health_weight * uav.health
+            + self.link_weight * uav.link_quality
+            + self.rev_weight * uav.collected_revenue
         )
 
 
-    def should_backup(self, uav: UAV) -> bool:
-        """Check if UAV should perform backup action."""
-        score = self.compute_state_score(uav)
-        return score < self.config.mdp.action.backup.threshold
+    def _should_backup(self, uav: UAV) -> bool:
+        return self._compute_score(uav) < self.backup_treshold
     
 
     def decide_action(self, uav: UAV) -> str:
-        if self.should_backup(uav):
+        if self._should_backup(uav):
             return "backup"
-
         return "continue"

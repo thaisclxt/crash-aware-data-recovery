@@ -34,6 +34,7 @@ class UAVConfig:
     speed: float
     max_flight_time: float
     hover_time: float
+    preparation_time: float
     communication_range: float
     base_crash_probability: float
 
@@ -95,10 +96,16 @@ class CollectedRevenueStateConfig:
 
 
 @dataclass
+class BackedUpRevenueStateConfig:
+    default: float
+
+
+@dataclass
 class MDPStateConfig:
     health: HealthStateConfig
     link_quality: LinkQualityStateConfig
     collected_revenue: CollectedRevenueStateConfig
+    backed_up_revenue: BackedUpRevenueStateConfig
 
 
 @dataclass
@@ -164,6 +171,8 @@ def load_configuration(path: Path) -> Config:
     collected_revenue = mdp_state.get("collected_revenue", {})
     collected_revenue_threshold = collected_revenue.get("threshold", {})
 
+    backed_up_revenue = mdp_state.get("backed_up_revenue", {})
+
     return_action = mdp_action.get("return", {})
     return_threshold = return_action.get("threshold", {})
 
@@ -190,6 +199,7 @@ def load_configuration(path: Path) -> Config:
             speed=uav.get("speed"),
             max_flight_time=uav.get("max_flight_time"),
             hover_time=uav.get("hover_time"),
+            preparation_time=uav.get("preparation_time"),
             communication_range=uav.get("communication_range"),
             base_crash_probability=uav.get("base_crash_probability"),
         ),
@@ -231,6 +241,9 @@ def load_configuration(path: Path) -> Config:
                         medium=collected_revenue_threshold.get("medium"),
                     ),
                 ),
+                backed_up_revenue=BackedUpRevenueStateConfig(
+                    default=backed_up_revenue.get("default"),
+                )
             ),
             action=MDPActionConfig(
                 return_=ReturnActionConfig(

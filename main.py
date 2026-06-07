@@ -20,10 +20,10 @@ def main() -> None:
     # Initialize the environment, task allocator, and policy
     env = GridEnvironment(config=config)
 
+    # Create a simple task allocator that randomly assigns target waypoints to UAVs
     allocator = TaskAllocator(env=env)
-    allocator.initialize_uavs()
-    allocator.assign_random_sequences()
 
+    # Create the backup policy object
     policy = BackupPolicy(config=config)
 
     # Run the simulation for an specified number of time and save the results to an Excel file
