@@ -7,7 +7,6 @@ class Metrics:
     total_crashes: int = 0
     total_lost_revenue: float = 0.0
     total_revenue_backed_up: float = 0.0
-    total_delivered_revenue: float = 0.0
     backup_actions: int = 0
     continue_actions: int = 0
     successful_backups: int = 0
@@ -41,10 +40,6 @@ class Metrics:
 
     def record_lost_revenue(self, amount: float) -> None:
         self.total_lost_revenue += amount
-
-    
-    def record_delivered_revenue(self, amount: float) -> None:
-        self.total_delivered_revenue += amount
 
 
     def to_dict(self) -> dict:

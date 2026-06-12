@@ -32,7 +32,6 @@ class UAV:
 
         self.accumulated_risk: int = 0
         self.accumulated_revenue: float = 0.0
-        self.delivered_revenue: float = 0.0
         
         self.total_backed_up_revenue: float = 0.0
         self.lost_revenue = 0.0
@@ -89,15 +88,17 @@ class UAV:
                 speed=self.speed
             ) + self.hover_time
 
+        tour_time = 0
         while True:
-            if (x + y + ((m_j+1) * z) + (m_j * k)) > self.max_flight_time:
+            estimated_tour_time = x + y + ((m_j+1) * z) + (m_j * k)
+            if estimated_tour_time > self.max_flight_time:
                 break
 
-            time = x + y + ((m_j+1) * z) + (m_j * k)
+            tour_time = estimated_tour_time
             m_j += 1
 
         self.m_j = m_j
-        self.estimated_tour_time = time
+        self.estimated_tour_time = estimated_tour_time if m_j == 0 else tour_time
 
         self._set_tour()
 
@@ -194,22 +195,20 @@ class UAV:
         return self.tour_index >= len(self.tour) - 1
 
 
-    def update_accumulated_risk(self, env: GridEnvironment) -> int:
+    def update_accumulated_risk(self, env: GridEnvironment) -> None:
         wp = self.current_waypoint(env)
         if wp is None:
-            return 0
+            return
 
         self.accumulated_risk += wp.risk
-        return wp.risk
 
 
-    def update_accumulated_revenue(self, env: GridEnvironment) -> float:
+    def update_accumulated_revenue(self, env: GridEnvironment) -> None:
         wp = self.current_waypoint(env)
         if wp is None:
-            return 0.0
+            return
 
         self.accumulated_revenue += wp.revenue
-        return wp.revenue
 
 
     def update_health(
@@ -231,12 +230,13 @@ class UAV:
         # alpha and beta are weights that determine the relative importance of flight time and risk in calculating health score
         score = alpha * (1.0 - flight_fraction) + beta * (1.0 - risk_fraction)
 
+        # normalize values
         if score > good_threshold:
-            self.health = 1.0
+            self.health = 0.0
         elif score > warning_threshold:
             self.health = 0.5
         else:
-            self.health = 0.0
+            self.health = 1.0
 
 
     def update_link_quality(
@@ -257,41 +257,36 @@ class UAV:
             dist = euclidean_distance(my_location, other_location)
             indicators.append(1 if dist <= communication_range else 0)
 
+        # TODO: normalize
+
         self.link_quality = sum(indicators) / len(indicators) if indicators else 0.0
 
 
     def update_collected_revenue(
         self,
-        total_targets: int,
         max_wp_revenue: float,
         low_threshold: float,
         medium_threshold: float,
     ) -> None:
-        max_possible_revenue = total_targets * max_wp_revenue
-        if max_possible_revenue <= 0.0:
-            self.collected_revenue = 0.0
-            return
-
+        # max possible revenue for this uav
+        max_possible_revenue = len(self.sequence) * max_wp_revenue
         mission_revenue = self.accumulated_revenue + self.backed_up_revenue
+
         revenue_fraction = min(1.0, mission_revenue / max_possible_revenue)
 
-        self.revenue_fraction = revenue_fraction  # Store for potential use
-
-        if revenue_fraction < low_threshold:
-            self.collected_revenue = 0.0
-        elif revenue_fraction < medium_threshold:
+        # normalize values
+        if revenue_fraction > medium_threshold:
+            self.collected_revenue = 1.0
+        elif revenue_fraction > low_threshold:
             self.collected_revenue = 0.5
         else:
-            self.collected_revenue = 1.0
+            self.collected_revenue = 0.0
 
 
     def health_label(self) -> str:
-        good_threshold = self.config.mdp.state.health.threshold.good
-        warning_threshold = self.config.mdp.state.health.threshold.warning
-
-        if self.health >= good_threshold:
+        if self.health == 0.0:
             return "good"
-        if self.health >= warning_threshold:
+        if self.health == 0.5:
             return "warning"
         return "critical"
 

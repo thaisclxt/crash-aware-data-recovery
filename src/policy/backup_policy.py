@@ -23,7 +23,7 @@ class BackupPolicy:
 
 
     def _should_backup(self, uav: UAV) -> bool:
-        return self._compute_score(uav) < self.backup_treshold
+        return self._compute_score(uav) > self.backup_treshold
     
 
     def decide_action(self, uav: UAV) -> str:

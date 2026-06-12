@@ -68,7 +68,7 @@ class Simulator:
         for uav in self.uavs.values():
             if self.time < self.config.simulation.time_limit:
                 self._log_state(uav=uav, event_type="arrival", wp_id="depot")
-                self.schedule(self.time + uav.preparation_time, "departure_from_depot", uav.uav_id)
+                self.schedule(self.time, "departure_from_depot", uav.uav_id)
 
         self.schedule(self.config.waypoint.risk.update_interval, "update_wp_risk")
         self.schedule(self.config.waypoint.revenue.update_interval, "update_wp_revenue")
@@ -104,15 +104,13 @@ class Simulator:
         self._update_uav_time(uav)
         uav.finish_travel()
 
-        crash_draw, crashed = self._check_geometric_crash(uav)
-        crash_prob = self.config.uav.base_crash_probability
-
+        crash_draw, crash_prob, crashed = self._check_geometric_crash(uav)
         if crashed:
             self._crash_uav(uav, crash_draw=crash_draw, crash_prob=crash_prob)
             return
 
-        risk_added = uav.update_accumulated_risk(self.env)
-        revenue_added = uav.update_accumulated_revenue(self.env)
+        uav.update_accumulated_risk(self.env)
+        uav.update_accumulated_revenue(self.env)
 
         self._log_state(
             uav=uav, 
@@ -159,6 +157,9 @@ class Simulator:
         self._update_uav_decision_state(uav)
 
         next_wp_id = uav.peek_next_wp_id()
+
+        if next_wp_id is None or next_wp_id == "depot":
+            return
 
         depot = self.config.environment.depot_location
         next_wp = self.env.get_waypoint(next_wp_id)
@@ -238,18 +239,15 @@ class Simulator:
         self._update_uav_time(uav)
         uav.finish_travel()
 
-        delivered_amount = uav.accumulated_revenue + uav.backed_up_revenue
-        uav.delivered_revenue += delivered_amount
-
         self._log_state(uav=uav, event_type="arrival", wp_id="depot")
 
         uav.metrics.record_completed_tours()
-        uav.metrics.record_delivered_revenue(delivered_amount)
 
         self._reset_uav_for_new_mission(uav)
 
-        if self.time < self.config.simulation.time_limit:
-            self.schedule(self.time + uav.preparation_time, "departure_from_depot", uav.uav_id)
+        t = self.time + uav.preparation_time
+        if t < self.config.simulation.time_limit:
+            self.schedule(t, "departure_from_depot", uav.uav_id)
 
 
     def _reset_uav_for_new_mission(self, uav: UAV) -> None:
@@ -295,11 +293,11 @@ class Simulator:
         uav.last_event_time = self.time
 
 
-    def _check_geometric_crash(self, uav: UAV) -> tuple[float, bool]:
+    def _check_geometric_crash(self, uav: UAV) -> tuple[float, float, bool]:
         crash_draw = random.random()
-        crash_prob = self.config.uav.base_crash_probability
-        crashed = crash_draw < crash_prob
-        return crash_draw, crashed
+        crash_prob = self.config.uav.base_crash_probability * uav.health
+        crashed = crash_draw <= crash_prob
+        return crash_draw, crash_prob, crashed
 
 
     def _crash_uav(self, uav: UAV, crash_draw: float, crash_prob: float) -> None:
@@ -317,6 +315,7 @@ class Simulator:
             crash_prob=crash_prob
         )
 
+        # uav.finish_travel()
         self._replace_crashed_uav(uav)
 
 
@@ -330,15 +329,20 @@ class Simulator:
             config=self.config,
         )
 
-        new_uav.delivered_revenue = crashed_uav.delivered_revenue
+        new_uav.tour = crashed_uav.tour
+        new_uav.m_j = crashed_uav.m_j
+        new_uav.metrics = crashed_uav.metrics
         new_uav.total_backed_up_revenue = crashed_uav.total_backed_up_revenue
-        new_uav.completed_missions = crashed_uav.completed_missions
         new_uav.lost_revenue = crashed_uav.lost_revenue
-        new_uav.update_tour_stats(self.env)
+
+        self._reset_uav_for_new_mission(new_uav)
 
         self.uavs[new_uav.uav_id] = new_uav
 
-        self.schedule(self.time + new_uav.preparation_time, "departure_from_depot", new_uav.uav_id)
+        t = self.time + new_uav.preparation_time
+        if t < self.config.simulation.time_limit:
+            self._log_state(uav=new_uav, event_type="replaced", wp_id="depot")
+            self.schedule(t, "departure_from_depot", new_uav.uav_id)
 
 
     def _update_uav_decision_state(self, uav: UAV) -> None:
@@ -359,7 +363,6 @@ class Simulator:
         )
 
         uav.update_collected_revenue(
-            total_targets=self.env.total_targets,
             max_wp_revenue=self.config.waypoint.revenue.max,
             low_threshold=self.config.mdp.state.collected_revenue.threshold.low,
             medium_threshold=self.config.mdp.state.collected_revenue.threshold.medium,
@@ -385,13 +388,14 @@ class Simulator:
             "wp_revenue": wp.revenue if wp else None,
             "wp_risk": wp.risk if wp else None,
             "uav_remaining_flight_time": uav.remaining_flight_time,
-            "uav_health": uav.health_label(),
+            "uav_health": uav.health,
+            "uav_health_label": uav.health_label(),
             "uav_link_quality": uav.link_quality,
-            "uav_collected_revenue": uav.collected_revenue_label(),
+            "uav_collected_revenue": uav.collected_revenue,
+            "uav_collected_revenue_label": uav.collected_revenue_label(),
             "uav_accumulated_risk": uav.accumulated_risk,
             "uav_accumulated_revenue": uav.accumulated_revenue,
             "uav_backed_up_revenue": uav.backed_up_revenue,
-            "uav_delivered_revenue": uav.delivered_revenue,
             "action": action if action else "",
             "crash_draw": crash_draw if crash_draw is not None else "",
             "crash_prob": crash_prob if crash_prob is not None else "",
@@ -430,7 +434,6 @@ class Simulator:
                 "total_crashes": uav.metrics.total_crashes,
                 "total_lost_revenue": uav.metrics.total_lost_revenue,
                 "total_revenue_backed_up": uav.metrics.total_revenue_backed_up,
-                "total_delivered_revenue": uav.metrics.total_delivered_revenue,
                 "backup_actions": uav.metrics.backup_actions,
                 "continue_actions": uav.metrics.continue_actions,
                 "successful_backups": uav.metrics.successful_backups,

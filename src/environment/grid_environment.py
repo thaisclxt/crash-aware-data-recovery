@@ -67,7 +67,7 @@ class GridEnvironment:
                 raise ValueError(
                     f"Requested {requested} targets, but only {available} waypoints are available."
                 )
-            
+
             return sorted(random.sample(self.waypoints, requested), key=lambda wp: wp.w_id)
         
         fixed_locations = {
