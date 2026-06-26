@@ -5,7 +5,7 @@ simulation:
 
 # this environment and uav configuration require at least 3 uavs to monitor all 168 waypoints
 environment:
-  total_uavs: 3
+  total_uavs: [3, 4, 5, 6, 7]
   total_targets: 90
   depot_location: [0, 0]
   fixed_targets: [ # use this if generate_random_targets is false for testing
@@ -17,40 +17,36 @@ environment:
 grid:
   width: 13
   height: 13
-  spacing: 1
+  spacing: 92.608
 
 uav:
-  speed: 20
+  speed: 16
   max_flight_time: 1920
-  hover_time: 30 # time taken to collect revenue at each target waypoint
-  preparation_time: 60 # time taken to prepare the UAV for the next tour after returning to depot
+  hover_time: 5 # time taken to collect revenue at each target waypoint
+  preparation_time: 30 # time taken to prepare the UAV for the next tour after returning to depot
   communication_range: 95 # based on the results from Justin's paper
-  base_crash_probability: 0.6 # higher values means more likely to crash
+  base_crash_probability: [0.1, 0.5, 0.8] #higher values means more likely to crash
 
 # update_interval means how often the revenue and risk are updated
 waypoint:
   revenue:
-    base: 30
     min: 60
     max: 600
     update_interval: 90
-  risk:
-    base: 0
-    min: 0
+  risk: # is binary 1 or 0
     max: 3 # if the uav visit 3 risky waypoints ...
     update_interval: 50
 
 mdp:
   state: # each state has a weight that determines its importance in the overall policy score
     health: # alpha and beta are weights that determine the relative importance of flight time and risk in calculating health score
-      default: 0 # all UAVs start with full health
+      default: 1 # all UAVs start with full health
       alpha: 0.6 # higher values means flight time is more important for the health score
       beta: 0.4 # higher values means risk is more important for the health score
       weight: 0.7
       threshold: # for the score
         good: 0.7
         warning: 0.4
-        # 1 critical, 0.5 warning and 0 good
 
     link_quality:
       default: 1.0 # all UAVs start with perfect link quality
@@ -67,9 +63,5 @@ mdp:
       default: 0.0 # all UAVs start with no revenue backed_up
   
   action:
-    return:
-      threshold:
-        link_quality: 0.15
-        revenue: 0.5
     backup:
       threshold: 0.5

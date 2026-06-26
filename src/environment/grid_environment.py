@@ -17,7 +17,6 @@ class GridEnvironment:
         self.height = config.grid.height
         self.spacing = config.grid.spacing
 
-        self.total_uavs = config.environment.total_uavs
         self.depot_location = config.environment.depot_location
 
         self.waypoints: List[Waypoint] = self._build_grid()
@@ -49,8 +48,8 @@ class GridEnvironment:
                     Waypoint(
                         w_id=w_id,
                         location=location,
-                        revenue=self.config.waypoint.revenue.base,
-                        risk=self.config.waypoint.risk.base,
+                        revenue=0,
+                        risk=0,
                     )
                 )
                 w_id += 1

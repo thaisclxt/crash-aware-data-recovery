@@ -10,8 +10,9 @@ class TaskAllocator:
     """
     A simple task allocator that assigns target waypoints to UAVs randomly.
     """
-    def __init__(self, env: GridEnvironment) -> None:
+    def __init__(self, env: GridEnvironment, total_uavs: int) -> None:
         self.env = env
+        self.total_uavs = total_uavs
         self.uavs = self._build_uavs()
 
         self._assign_tasks()
@@ -24,7 +25,7 @@ class TaskAllocator:
                 sequence=[],
                 config=self.env.config,
             )
-            for uav_id in range(self.env.total_uavs)
+            for uav_id in range(self.total_uavs)
         ]
 
 

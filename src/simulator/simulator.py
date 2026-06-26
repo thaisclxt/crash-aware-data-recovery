@@ -19,11 +19,13 @@ class Simulator:
         env: GridEnvironment,
         uavs: List[UAV],
         policy: BackupPolicy,
+        cb: float
     ) -> None:
         self.config = config
         self.env = env
         self.uavs: Dict[int, UAV] = {uav.uav_id: uav for uav in uavs}
         self.policy = policy
+        self.cb = cb
 
         self.time: float = 0.0
         self.event_counter: int = 0
@@ -241,7 +243,10 @@ class Simulator:
 
         self._log_state(uav=uav, event_type="arrival", wp_id="depot")
 
-        uav.metrics.record_completed_tours()
+        uav.metrics.record_arrival_at_depot(
+            accumulated_revenue=uav.accumulated_revenue,
+            backedup_revenue=uav.backed_up_revenue
+        )
 
         self._reset_uav_for_new_mission(uav)
 
@@ -295,7 +300,7 @@ class Simulator:
 
     def _check_geometric_crash(self, uav: UAV) -> tuple[float, float, bool]:
         crash_draw = random.random()
-        crash_prob = self.config.uav.base_crash_probability * uav.health
+        crash_prob = self.cb * uav.health
         crashed = crash_draw <= crash_prob
         return crash_draw, crash_prob, crashed
 
@@ -304,7 +309,10 @@ class Simulator:
         lost_amount = uav.accumulated_revenue
         uav.lost_revenue += lost_amount
 
-        uav.metrics.record_crash()
+        uav.metrics.record_crash(
+            accumulated_revenue=uav.accumulated_revenue,
+            backedup_revenue=uav.backed_up_revenue
+        )
         uav.metrics.record_lost_revenue(lost_amount)
         
         self._log_state(
@@ -341,7 +349,7 @@ class Simulator:
 
         t = self.time + new_uav.preparation_time
         if t < self.config.simulation.time_limit:
-            self._log_state(uav=new_uav, event_type="replaced", wp_id="depot")
+            self._log_state(uav=new_uav, event_type="replacement", wp_id="depot")
             self.schedule(t, "departure_from_depot", new_uav.uav_id)
 
 
@@ -389,10 +397,8 @@ class Simulator:
             "wp_risk": wp.risk if wp else None,
             "uav_remaining_flight_time": uav.remaining_flight_time,
             "uav_health": uav.health,
-            "uav_health_label": uav.health_label(),
             "uav_link_quality": uav.link_quality,
             "uav_collected_revenue": uav.collected_revenue,
-            "uav_collected_revenue_label": uav.collected_revenue_label(),
             "uav_accumulated_risk": uav.accumulated_risk,
             "uav_accumulated_revenue": uav.accumulated_revenue,
             "uav_backed_up_revenue": uav.backed_up_revenue,
@@ -438,6 +444,10 @@ class Simulator:
                 "continue_actions": uav.metrics.continue_actions,
                 "successful_backups": uav.metrics.successful_backups,
                 "failed_backups": uav.metrics.failed_backups,
+                "total_acc_revenue_when_arrives_to_depot": uav.metrics.total_acc_revenue_when_arrives_to_depot,
+                "total_backedup_revenue_when_arrives_to_depot": uav.metrics.total_backedup_revenue_when_arrives_to_depot,
+                "total_acc_revenue_when_it_crashes": uav.metrics.total_acc_revenue_when_it_crashes,
+                "total_backedup_revenue_when_it_crashes": uav.metrics.total_backedup_revenue_when_it_crashes,
             })
 
 

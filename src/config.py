@@ -16,7 +16,7 @@ class SimulationConfig:
 
 @dataclass
 class EnvironmentConfig:
-    total_uavs: int
+    total_uavs: list
     total_targets: int
     depot_location: tuple[float, float]
     fixed_targets: list[tuple[float, float]]
@@ -36,12 +36,11 @@ class UAVConfig:
     hover_time: float
     preparation_time: float
     communication_range: float
-    base_crash_probability: float
+    base_crash_probability: list
 
 
 @dataclass
 class RevenueConfig:
-    base: float
     min: float
     max: float
     update_interval: float
@@ -49,8 +48,6 @@ class RevenueConfig:
 
 @dataclass
 class RiskConfig:
-    base: float
-    min: float
     max: float
     update_interval: float
 
@@ -109,24 +106,12 @@ class MDPStateConfig:
 
 
 @dataclass
-class ReturnActionThresholdConfig:
-    link_quality: float
-    revenue: float
-
-
-@dataclass
-class ReturnActionConfig:
-    threshold: ReturnActionThresholdConfig
-
-
-@dataclass
 class BackupActionConfig:
     threshold: float
 
 
 @dataclass
 class MDPActionConfig:
-    return_: ReturnActionConfig
     backup: BackupActionConfig
 
 
@@ -205,14 +190,11 @@ def load_configuration(path: Path) -> Config:
         ),
         waypoint=WaypointConfig(
             revenue=RevenueConfig(
-                base=waypoint_revenue.get("base"),
                 min=waypoint_revenue.get("min"),
                 max=waypoint_revenue.get("max"),
                 update_interval=waypoint_revenue.get("update_interval"),
             ),
             risk=RiskConfig(
-                base=waypoint_risk.get("base"),
-                min=waypoint_risk.get("min"),
                 max=waypoint_risk.get("max"),
                 update_interval=waypoint_risk.get("update_interval"),
             ),
@@ -246,12 +228,6 @@ def load_configuration(path: Path) -> Config:
                 )
             ),
             action=MDPActionConfig(
-                return_=ReturnActionConfig(
-                    threshold=ReturnActionThresholdConfig(
-                        link_quality=return_threshold.get("link_quality"),
-                        revenue=return_threshold.get("revenue"),
-                    ),
-                ),
                 backup=BackupActionConfig(
                     threshold=backup_action.get("threshold"),
                 ),

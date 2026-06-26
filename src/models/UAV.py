@@ -232,11 +232,11 @@ class UAV:
 
         # normalize values
         if score > good_threshold:
-            self.health = 0.0
+            self.health = 1.0
         elif score > warning_threshold:
             self.health = 0.5
         else:
-            self.health = 1.0
+            self.health = 0.0
 
 
     def update_link_quality(
@@ -256,8 +256,6 @@ class UAV:
             other_location = other.current_location(env, now)
             dist = euclidean_distance(my_location, other_location)
             indicators.append(1 if dist <= communication_range else 0)
-
-        # TODO: normalize
 
         self.link_quality = sum(indicators) / len(indicators) if indicators else 0.0
 
@@ -281,22 +279,3 @@ class UAV:
             self.collected_revenue = 0.5
         else:
             self.collected_revenue = 0.0
-
-
-    def health_label(self) -> str:
-        if self.health == 0.0:
-            return "good"
-        if self.health == 0.5:
-            return "warning"
-        return "critical"
-
-
-    def collected_revenue_label(self) -> str:
-        medium_threshold = self.config.mdp.state.collected_revenue.threshold.medium
-        low_threshold = self.config.mdp.state.collected_revenue.threshold.low
-
-        if self.collected_revenue > medium_threshold:
-            return "high"
-        if self.collected_revenue > low_threshold:
-            return "medium"
-        return "low"

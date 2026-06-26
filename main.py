@@ -19,23 +19,31 @@ def main() -> None:
 
     # Initialize the environment, task allocator, and policy
     env = GridEnvironment(config=config)
+    
+    count=0
+    # Run the simulation for different cb and number of uavs values
+    for cb in config.uav.base_crash_probability:
+        for total_uavs in config.environment.total_uavs:
 
-    # Create a simple task allocator that randomly assigns target waypoints to UAVs
-    allocator = TaskAllocator(env=env)
+            # Create a simple task allocator that randomly assigns target waypoints to UAVs
+            allocator = TaskAllocator(env=env, total_uavs=total_uavs)
 
-    # Create the backup policy object
-    policy = BackupPolicy(config=config)
+            # Create the backup policy object
+            policy = BackupPolicy(config=config)
 
-    # Run the simulation for an specified number of time and save the results to an Excel file
-    sim = Simulator(
-        config=config,
-        env=env,
-        uavs=allocator.uavs,
-        policy=policy,
-    )
+            # Run the simulation for an specified number of time and save the results to an Excel file
+            sim = Simulator(
+                config=config,
+                env=env,
+                uavs=allocator.uavs,
+                policy=policy,
+                cb=cb,
+            )
 
-    sim.run()
-    sim.save_results("output/results.xlsx")
+            sim.run()
+
+            count+=1
+            sim.save_results(f"results/{cb}crash{total_uavs}uavs.xlsx")
 
 
 if __name__ == "__main__":

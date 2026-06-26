@@ -12,6 +12,11 @@ class Metrics:
     successful_backups: int = 0
     failed_backups: int = 0
 
+    total_acc_revenue_when_arrives_to_depot: float = 0.0
+    total_backedup_revenue_when_arrives_to_depot: float = 0.0
+    total_acc_revenue_when_it_crashes: float = 0.0
+    total_backedup_revenue_when_it_crashes: float = 0.0
+
 
     def record_action(self, action: str) -> None:
         if action == "backup":
@@ -30,12 +35,24 @@ class Metrics:
             self.failed_backups += 1
 
 
-    def record_crash(self) -> None:
+    def record_crash(
+        self,
+        accumulated_revenue: float,
+        backedup_revenue: float,
+    ) -> None:
         self.total_crashes += 1
+        self.total_acc_revenue_when_it_crashes += accumulated_revenue
+        self.total_backedup_revenue_when_it_crashes += backedup_revenue
 
 
-    def record_completed_tours(self) -> None:
+    def record_arrival_at_depot(
+        self,
+        accumulated_revenue: float,
+        backedup_revenue: float,
+    ) -> None:
         self.completed_tours += 1
+        self.total_acc_revenue_when_arrives_to_depot += accumulated_revenue
+        self.total_backedup_revenue_when_arrives_to_depot += backedup_revenue
 
 
     def record_lost_revenue(self, amount: float) -> None:
