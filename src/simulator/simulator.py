@@ -300,7 +300,7 @@ class Simulator:
 
     def _check_geometric_crash(self, uav: UAV) -> tuple[float, float, bool]:
         crash_draw = random.random()
-        crash_prob = self.cb * uav.health
+        crash_prob = self.cb * (1 - uav.health)
         crashed = crash_draw <= crash_prob
         return crash_draw, crash_prob, crashed
 
@@ -371,7 +371,7 @@ class Simulator:
         )
 
         uav.update_collected_revenue(
-            max_wp_revenue=self.config.waypoint.revenue.max,
+            env=self.env,
             low_threshold=self.config.mdp.state.collected_revenue.threshold.low,
             medium_threshold=self.config.mdp.state.collected_revenue.threshold.medium,
         )

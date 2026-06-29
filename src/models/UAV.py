@@ -262,12 +262,12 @@ class UAV:
 
     def update_collected_revenue(
         self,
-        max_wp_revenue: float,
+        env: GridEnvironment,
         low_threshold: float,
         medium_threshold: float,
     ) -> None:
         # max possible revenue for this uav
-        max_possible_revenue = len(self.sequence) * max_wp_revenue
+        max_possible_revenue = sum(env.get_waypoint(wp_id).revenue for wp_id in self.tour if wp_id != "depot")
         mission_revenue = self.accumulated_revenue + self.backed_up_revenue
 
         revenue_fraction = min(1.0, mission_revenue / max_possible_revenue)

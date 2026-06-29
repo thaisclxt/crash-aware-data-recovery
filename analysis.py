@@ -122,7 +122,7 @@ for cb_value in sorted(plot_df["cb"].dropna().unique()):
 
     ax.set_xlabel("Number of UAVs")
     ax.set_ylabel("Revenue")
-    ax.set_title(f"When returns to depot (cb={cb_value})", pad=4)
+    # ax.set_title(f"When returns to depot (cb={cb_value})", pad=4)
     ax.set_xticks(x)
     ax.set_xticklabels(x_labels)
     ax.legend(loc="best", frameon=True, edgecolor="black", fancybox=False)
@@ -160,7 +160,7 @@ for cb_value in sorted(plot_df["cb"].dropna().unique()):
 
     ax.set_xlabel("Number of UAVs")
     ax.set_ylabel("Revenue")
-    ax.set_title(f"When it crashes (cb={cb_value})", pad=4)
+    # ax.set_title(f"When it crashes (cb={cb_value})", pad=4)
     ax.set_xticks(x)
     ax.set_xticklabels(x_labels)
     ax.legend(loc="best", frameon=True, edgecolor="black", fancybox=False)
